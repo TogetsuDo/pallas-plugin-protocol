@@ -1,3 +1,7 @@
+<div align="center">
+  <img alt="Pallas-Bot" src="https://user-images.githubusercontent.com/18511905/195892994-c1a231ec-147a-4f98-ba75-137d89578247.png" width="360" height="270" />
+</div>
+
 # pallas-plugin-protocol
 
 Pallas-Bot 4.0 官方扩展：**协议端管理**（NapCat / SnowLuma）与 **牛牛重新上号**（含分片 worker 转发）。
