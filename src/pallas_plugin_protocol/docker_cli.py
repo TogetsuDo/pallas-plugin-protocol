@@ -76,7 +76,9 @@ def docker_inspect_running_sync(name: str) -> bool:
 async def docker_rm_force_async(name: str) -> None:
     if not shutil.which("docker"):
         return
-    p = await asyncio.create_subprocess_exec("docker", "rm", "-f", name, stderr=asyncio.subprocess.DEVNULL)
+    p = await asyncio.create_subprocess_exec(
+        "docker", "rm", "-f", name, stderr=asyncio.subprocess.DEVNULL
+    )
     await p.wait()
 
 
@@ -115,6 +117,11 @@ def docker_stop_sync(name: str, *, subprocess_timeout: int = 60) -> None:
     if not shutil.which("docker"):
         return
     try:
-        subprocess.run(["docker", "stop", name], check=False, capture_output=True, timeout=subprocess_timeout)  # noqa: S603
+        subprocess.run(
+            ["docker", "stop", name],
+            check=False,
+            capture_output=True,
+            timeout=subprocess_timeout,
+        )  # noqa: S603
     except (OSError, subprocess.TimeoutExpired):
         pass

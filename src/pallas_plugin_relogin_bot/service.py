@@ -56,7 +56,9 @@ async def bot_id_exists_in_db(bot_id: int) -> bool:
         return False
 
 
-async def wait_qrcode(account_data_dir: Path, since: datetime, timeout_sec: int = 60) -> Path | None:
+async def wait_qrcode(
+    account_data_dir: Path, since: datetime, timeout_sec: int = 60
+) -> Path | None:
     qr_path = account_data_dir / "cache" / "qrcode.png"
     deadline = asyncio.get_running_loop().time() + timeout_sec
     while asyncio.get_running_loop().time() < deadline:
@@ -103,7 +105,9 @@ async def run_relogin_restart(qq: str, result: ReloginHandleResult) -> None:
 
     qr_path = await wait_qrcode(account_data_dir, started_at)
     if qr_path is None:
-        append_text(result, "已完成启动，但在 60 秒内未检测到新的二维码文件，请寻找号主上报情况")
+        append_text(
+            result, "已完成启动，但在 60 秒内未检测到新的二维码文件，请寻找号主上报情况"
+        )
         return
 
     append_text(result, "启动完成，请使用下面二维码登录：")
@@ -126,7 +130,9 @@ async def handle_relogin_message(
         arg = plain.removeprefix("牛牛重新上号").strip()
         qq = extract_qq(arg)
         if qq:
-            session = ReloginSession(kind="relogin", step="validate_qq", data={"qq": qq})
+            session = ReloginSession(
+                kind="relogin", step="validate_qq", data={"qq": qq}
+            )
             _sessions[key] = session
         else:
             append_text(result, "请回复要重新上号的QQ号：")
@@ -139,7 +145,9 @@ async def handle_relogin_message(
         if arg:
             parts = arg.split()
             if len(parts) < 3:  # noqa: PLR2004
-                append_text(result, "参数不足，需要：牛牛昵称 牛牛账号 号主账号（至少一个）")
+                append_text(
+                    result, "参数不足，需要：牛牛昵称 牛牛账号 号主账号（至少一个）"
+                )
                 return result
             display_name, qq, *owner_qqs = parts
             if not qq.isdigit() or len(qq) < 5:  # noqa: PLR2004
@@ -162,7 +170,9 @@ async def handle_relogin_message(
             _sessions[key] = session
         else:
             append_text(result, "请输入牛牛昵称：")
-            _sessions[key] = ReloginSession(kind="create", step="await_name", data={"interactive": True})
+            _sessions[key] = ReloginSession(
+                kind="create", step="await_name", data={"interactive": True}
+            )
             result.session_active = True
             return result
 
@@ -233,7 +243,9 @@ async def handle_relogin_session(
         try:
             from pallas_plugin_protocol import manager as protocol_manager
 
-            protocol_manager.create_account({"qq": qq, "display_name": nickname, "enabled": True})
+            protocol_manager.create_account(
+                {"qq": qq, "display_name": nickname, "enabled": True}
+            )
             append_text(result, f"已创建 {nickname} 并继续上号流程。")
         except Exception as err:
             append_text(result, f"自动创建协议端失败：{err}")
@@ -297,7 +309,9 @@ async def handle_create_session(
             return
         invalid = [oq for oq in owner_qqs if not oq.isdigit()]
         if invalid:
-            result.reject_hint = f"号主账号格式不正确：{'、'.join(invalid)}，请重新输入："
+            result.reject_hint = (
+                f"号主账号格式不正确：{'、'.join(invalid)}，请重新输入："
+            )
             result.session_active = True
             return
         session.data["owner_qqs"] = owner_qqs
@@ -313,7 +327,9 @@ async def handle_create_session(
     owner_qqs = list(session.data.get("owner_qqs") or [])
 
     try:
-        protocol_manager.create_account({"qq": qq, "display_name": display_name, "enabled": True})
+        protocol_manager.create_account(
+            {"qq": qq, "display_name": display_name, "enabled": True}
+        )
     except Exception as err:
         append_text(result, f"创建账号失败：{err}")
         return
@@ -349,5 +365,11 @@ async def handle_create_session(
         append_qrcode(result, qr_path)
 
     owners_str = "、".join(owner_qqs)
-    timeout_hint = "\n但在 60 秒内未检测到新的二维码文件，请到协议端控制台查看或联系管理员。" if qr_path is None else ""
-    append_text(result, f"{display_name}：{qq} 已创建并启动。\n号主：{owners_str}{timeout_hint}")
+    timeout_hint = (
+        "\n但在 60 秒内未检测到新的二维码文件，请到协议端控制台查看或联系管理员。"
+        if qr_path is None
+        else ""
+    )
+    append_text(
+        result, f"{display_name}：{qq} 已创建并启动。\n号主：{owners_str}{timeout_hint}"
+    )

@@ -10,7 +10,10 @@ from src.console.webui import install_hot_reload_config, plugin_config_proxy
 from src.console.webui.field_help import field_help
 
 from .contract import resolve_public_mount_path
-from .runtime.installer import default_release_asset_for_platform, default_release_repo_for_platform
+from .runtime.installer import (
+    default_release_asset_for_platform,
+    default_release_repo_for_platform,
+)
 
 
 class Config(BaseModel):
@@ -250,7 +253,10 @@ class Config(BaseModel):
         ),
     )
     pallas_protocol_linux_xvfb_args: list[str] = Field(
-        default_factory=lambda: ["--auto-servernum", "--server-args=-screen 0 1280x720x24"],
+        default_factory=lambda: [
+            "--auto-servernum",
+            "--server-args=-screen 0 1280x720x24",
+        ],
         description=field_help(
             "传给虚拟显示器命令的参数",
             "JSON 数组，默认分辨率 1280x720",
@@ -484,7 +490,9 @@ plugin_config = plugin_config_proxy(get_pallas_protocol_config)
 def resolve_protocol_webui_base_path(config: Any) -> str:
     return resolve_public_mount_path(
         path_override=str(getattr(config, "pallas_protocol_webui_path", "") or ""),
-        implementation_slug=str(getattr(config, "pallas_protocol_web_implementation", "") or ""),
+        implementation_slug=str(
+            getattr(config, "pallas_protocol_web_implementation", "") or ""
+        ),
     )
 
 
@@ -547,7 +555,9 @@ def _ob_normalize_target_host(raw_host: str) -> str:
     return h
 
 
-def resolve_onebot_ws_settings(config: Config, *, bot_id: str = "") -> tuple[str, str, str]:
+def resolve_onebot_ws_settings(
+    config: Config, *, bot_id: str = ""
+) -> tuple[str, str, str]:
     """默认返回 hub/全局 WS；分片开启且提供 ``bot_id`` 时返回该牛所在 worker 的 WS。"""
     if bot_id:
         try:
@@ -557,18 +567,27 @@ def resolve_onebot_ws_settings(config: Config, *, bot_id: str = "") -> tuple[str
             if shard_ctx.sharding_active():
                 url, name, tok = resolve_onebot_ws_url_for_bot(
                     bot_id,
-                    name=str(getattr(config, "pallas_protocol_onebot_client_name", "") or "").strip()
-                    or _ob_env_first("PALLAS_PROTOCOL_ONEBOT_CLIENT_NAME", "ONEBOT_CLIENT_NAME")
+                    name=str(
+                        getattr(config, "pallas_protocol_onebot_client_name", "") or ""
+                    ).strip()
+                    or _ob_env_first(
+                        "PALLAS_PROTOCOL_ONEBOT_CLIENT_NAME", "ONEBOT_CLIENT_NAME"
+                    )
                     or "pallas",
-                    token=_ob_env_first("ACCESS_TOKEN") or _ob_driver_first("access_token"),
+                    token=_ob_env_first("ACCESS_TOKEN")
+                    or _ob_driver_first("access_token"),
                 )
                 if url:
                     return url, name, tok
         except Exception:
             pass
-    cfg_name = str(getattr(config, "pallas_protocol_onebot_client_name", "") or "").strip()
+    cfg_name = str(
+        getattr(config, "pallas_protocol_onebot_client_name", "") or ""
+    ).strip()
     name = (
-        cfg_name or _ob_env_first("PALLAS_PROTOCOL_ONEBOT_CLIENT_NAME", "ONEBOT_CLIENT_NAME") or "pallas"
+        cfg_name
+        or _ob_env_first("PALLAS_PROTOCOL_ONEBOT_CLIENT_NAME", "ONEBOT_CLIENT_NAME")
+        or "pallas"
     ).strip() or "pallas"
 
     token = _ob_env_first("ACCESS_TOKEN")
@@ -588,7 +607,9 @@ def resolve_onebot_ws_settings(config: Config, *, bot_id: str = "") -> tuple[str
     port = cfg_port or None
 
     if not host:
-        host = _ob_env_first("HOST", "ONEBOT_HOST") or _ob_driver_first("host", "onebot_host")
+        host = _ob_env_first("HOST", "ONEBOT_HOST") or _ob_driver_first(
+            "host", "onebot_host"
+        )
     if port is None:
         port = _ob_parse_port(_ob_env_first("PORT", "ONEBOT_PORT"))
     if port is None:
@@ -608,7 +629,11 @@ def onebot_connection_hints(config: Config) -> dict[str, object]:
     url, name, tok = resolve_onebot_ws_settings(config)
     cfg_host = str(getattr(config, "pallas_protocol_onebot_ws_host", "") or "").strip()
     cfg_port = _ob_parse_port(getattr(config, "pallas_protocol_onebot_ws_port", 0) or 0)
-    h = cfg_host or _ob_env_first("HOST", "ONEBOT_HOST") or _ob_driver_first("host", "onebot_host")
+    h = (
+        cfg_host
+        or _ob_env_first("HOST", "ONEBOT_HOST")
+        or _ob_driver_first("host", "onebot_host")
+    )
     port = cfg_port
     if port is None:
         port = _ob_parse_port(_ob_env_first("PORT", "ONEBOT_PORT"))

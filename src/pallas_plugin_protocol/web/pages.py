@@ -126,10 +126,14 @@ def _render_protocol_nav_links(
     return "\n        ".join(links)
 
 
-def _render_protocol_sidebar(base_path: str, active: str, pallas_console_http_base: str) -> str:
+def _render_protocol_sidebar(
+    base_path: str, active: str, pallas_console_http_base: str
+) -> str:
     p = (base_path or "").strip().rstrip("/")
     home = html_escape(f"{p}/", quote=True)
-    nav_body = _render_protocol_nav_links(base_path, active, link_class="shell__nav-link")
+    nav_body = _render_protocol_nav_links(
+        base_path, active, link_class="shell__nav-link"
+    )
     ext = shell_pallas_web_console_nav_link(pallas_console_http_base)
     mark_src = html_escape(shell_brand_mark_src(p), quote=True)
     return f"""    <aside class="shell__sidebar" aria-label="协议端导航">
@@ -151,9 +155,13 @@ def _render_protocol_sidebar(base_path: str, active: str, pallas_console_http_ba
     </aside>"""
 
 
-def _render_protocol_mobile_nav(base_path: str, active: str, pallas_console_http_base: str) -> str:
+def _render_protocol_mobile_nav(
+    base_path: str, active: str, pallas_console_http_base: str
+) -> str:
     mark_src = html_escape(shell_brand_mark_src(base_path), quote=True)
-    nav_body = _render_protocol_nav_links(base_path, active, link_class="shell-mobile-nav__link")
+    nav_body = _render_protocol_nav_links(
+        base_path, active, link_class="shell-mobile-nav__link"
+    )
     ext = shell_pallas_web_console_nav_link(
         pallas_console_http_base,
         link_class="shell-mobile-nav__link",
@@ -264,7 +272,9 @@ def render_protocol_shell_close(
     active: str,
     pallas_console_http_base: str,
 ) -> str:
-    mobile_nav = _render_protocol_mobile_nav(base_path, active, pallas_console_http_base)
+    mobile_nav = _render_protocol_mobile_nav(
+        base_path, active, pallas_console_http_base
+    )
     return f"""{shell_footer_html()} </div>
     </main>
   </div>
@@ -748,7 +758,9 @@ def _render_common_api_js() -> str:
     )
 
 
-def _render_hidden_token_sync_js(back_button_id: str = "backDash", *, page_session: str = "") -> str:
+def _render_hidden_token_sync_js(
+    back_button_id: str = "backDash", *, page_session: str = ""
+) -> str:
     back_id_js = json.dumps(back_button_id)
     page_sess_js = json.dumps(page_session)
     return f"""
@@ -767,9 +779,13 @@ def _render_hidden_token_sync_js(back_button_id: str = "backDash", *, page_sessi
 """
 
 
-def render_settings_page(base_path: str, pallas_console_http_base: str = "/pallas") -> str:
+def render_settings_page(
+    base_path: str, pallas_console_http_base: str = "/pallas"
+) -> str:
     """协议端偏好设置：与 WebUI 共用 localStorage。"""
-    path = base_path.rstrip("/") or resolve_public_mount_path(path_override="", implementation_slug="")
+    path = base_path.rstrip("/") or resolve_public_mount_path(
+        path_override="", implementation_slug=""
+    )
     p = json.dumps(path)
     common_api_js = _render_common_api_js()
     token_sync_js = _render_hidden_token_sync_js("backDash")
@@ -1039,7 +1055,9 @@ def render_settings_page(base_path: str, pallas_console_http_base: str = "/palla
 
 
 def render_dashboard(base_path: str, pallas_console_http_base: str = "/pallas") -> str:
-    path = base_path.rstrip("/") or resolve_public_mount_path(path_override="", implementation_slug="")
+    path = base_path.rstrip("/") or resolve_public_mount_path(
+        path_override="", implementation_slug=""
+    )
     p = json.dumps(path)
     common_api_js = _render_common_api_js()
     token_sync_js = _render_hidden_token_sync_js("backDash")
@@ -1801,15 +1819,25 @@ def render_dashboard(base_path: str, pallas_console_http_base: str = "/pallas") 
 """
 
 
-def render_import_page(base_path: str, pallas_console_http_base: str = "/pallas") -> str:
-    path = base_path.rstrip("/") or resolve_public_mount_path(path_override="", implementation_slug="")
+def render_import_page(
+    base_path: str, pallas_console_http_base: str = "/pallas"
+) -> str:
+    path = base_path.rstrip("/") or resolve_public_mount_path(
+        path_override="", implementation_slug=""
+    )
     p = json.dumps(path)
     common_api_js = _render_common_api_js()
     token_sync_js = _render_hidden_token_sync_js("backDash")
     shell_open = render_protocol_shell_open(
-        path, pallas_console_http_base, active="import", page_title="导入账号", page_desc="批量导入旧协议端数据"
+        path,
+        pallas_console_http_base,
+        active="import",
+        page_title="导入账号",
+        page_desc="批量导入旧协议端数据",
     )
-    shell_close = render_protocol_shell_close(path, active="import", pallas_console_http_base=pallas_console_http_base)
+    shell_close = render_protocol_shell_close(
+        path, active="import", pallas_console_http_base=pallas_console_http_base
+    )
     return f"""<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -1943,15 +1971,25 @@ def render_import_page(base_path: str, pallas_console_http_base: str = "/pallas"
 """
 
 
-def render_new_account_page(base_path: str, pallas_console_http_base: str = "/pallas") -> str:
-    path = base_path.rstrip("/") or resolve_public_mount_path(path_override="", implementation_slug="")
+def render_new_account_page(
+    base_path: str, pallas_console_http_base: str = "/pallas"
+) -> str:
+    path = base_path.rstrip("/") or resolve_public_mount_path(
+        path_override="", implementation_slug=""
+    )
     p = json.dumps(path)
     common_api_js = _render_common_api_js()
     token_sync_js = _render_hidden_token_sync_js("backDash")
     shell_open = render_protocol_shell_open(
-        path, pallas_console_http_base, active="new", page_title="创建账号", page_desc="新建协议实例"
+        path,
+        pallas_console_http_base,
+        active="new",
+        page_title="创建账号",
+        page_desc="新建协议实例",
     )
-    shell_close = render_protocol_shell_close(path, active="new", pallas_console_http_base=pallas_console_http_base)
+    shell_close = render_protocol_shell_close(
+        path, active="new", pallas_console_http_base=pallas_console_http_base
+    )
     return f"""<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -2047,15 +2085,25 @@ def render_new_account_page(base_path: str, pallas_console_http_base: str = "/pa
 """
 
 
-def render_protocol_assets_page(base_path: str, pallas_console_http_base: str = "/pallas") -> str:
-    path = base_path.rstrip("/") or resolve_public_mount_path(path_override="", implementation_slug="")
+def render_protocol_assets_page(
+    base_path: str, pallas_console_http_base: str = "/pallas"
+) -> str:
+    path = base_path.rstrip("/") or resolve_public_mount_path(
+        path_override="", implementation_slug=""
+    )
     p = json.dumps(path)
     common_api_js = _render_common_api_js()
     token_sync_js = _render_hidden_token_sync_js("backDash")
     shell_open = render_protocol_shell_open(
-        path, pallas_console_http_base, active="assets", page_title="协议资产", page_desc="运行时下载与 Docker"
+        path,
+        pallas_console_http_base,
+        active="assets",
+        page_title="协议资产",
+        page_desc="运行时下载与 Docker",
     )
-    shell_close = render_protocol_shell_close(path, active="assets", pallas_console_http_base=pallas_console_http_base)
+    shell_close = render_protocol_shell_close(
+        path, active="assets", pallas_console_http_base=pallas_console_http_base
+    )
     return f"""<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -3135,7 +3183,9 @@ def render_account_workspace(
     *,
     page_session: str = "",
 ) -> str:
-    path = base_path.rstrip("/") or resolve_public_mount_path(path_override="", implementation_slug="")
+    path = base_path.rstrip("/") or resolve_public_mount_path(
+        path_override="", implementation_slug=""
+    )
     p = json.dumps(path)
     aid = json.dumps(account_id)
     aid_h = html_escape(account_id, quote=True)
@@ -3148,7 +3198,9 @@ def render_account_workspace(
         page_title=f"账号 {account_id}",
         page_desc="实例控制台",
     )
-    shell_close = render_protocol_shell_close(path, active="", pallas_console_http_base=pallas_console_http_base)
+    shell_close = render_protocol_shell_close(
+        path, active="", pallas_console_http_base=pallas_console_http_base
+    )
     return f"""<!doctype html>
 <html lang="zh-CN">
 <head>

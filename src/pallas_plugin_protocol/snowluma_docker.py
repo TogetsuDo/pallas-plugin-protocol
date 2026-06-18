@@ -41,15 +41,26 @@ def snowluma_docker_volume_paths(account: dict) -> tuple[Path, Path, Path]:
 
 
 def _internal_webui_port(config: Any) -> int:
-    return int(getattr(config, "pallas_protocol_snowluma_docker_internal_webui_port", 5099) or 5099)
+    return int(
+        getattr(config, "pallas_protocol_snowluma_docker_internal_webui_port", 5099)
+        or 5099
+    )
 
 
 def _internal_onebot_http_port(config: Any) -> int:
-    return int(getattr(config, "pallas_protocol_snowluma_docker_internal_onebot_http_port", 3000) or 3000)
+    return int(
+        getattr(
+            config, "pallas_protocol_snowluma_docker_internal_onebot_http_port", 3000
+        )
+        or 3000
+    )
 
 
 def _internal_onebot_ws_port(config: Any) -> int:
-    return int(getattr(config, "pallas_protocol_snowluma_docker_internal_onebot_ws_port", 3001) or 3001)
+    return int(
+        getattr(config, "pallas_protocol_snowluma_docker_internal_onebot_ws_port", 3001)
+        or 3001
+    )
 
 
 def snowluma_docker_effective_host_novnc_port(account: dict, config: Any) -> int:
@@ -58,7 +69,9 @@ def snowluma_docker_effective_host_novnc_port(account: dict, config: Any) -> int
             return int(str(account["snowluma_docker_host_novnc_port"]).strip())
         except (TypeError, ValueError):
             return 0
-    return int(getattr(config, "pallas_protocol_snowluma_docker_host_novnc_port", 0) or 0)
+    return int(
+        getattr(config, "pallas_protocol_snowluma_docker_host_novnc_port", 0) or 0
+    )
 
 
 def snowluma_docker_effective_host_vnc_port(account: dict, config: Any) -> int:
@@ -86,7 +99,9 @@ def build_snowluma_docker_run_argv(account: dict, config: Any, resolve_qq) -> li
     if not (1 <= host_webui <= 65535):
         host_webui = in_webui
     try:
-        host_http = int(str(account.get("snowluma_docker_host_onebot_http", "")).strip())
+        host_http = int(
+            str(account.get("snowluma_docker_host_onebot_http", "")).strip()
+        )
     except (TypeError, ValueError):
         host_http = 0
     try:
@@ -99,8 +114,15 @@ def build_snowluma_docker_run_argv(account: dict, config: Any, resolve_qq) -> li
 
     name = snowluma_docker_container_name(account)
     data_dir, cfg_dir, local_share = snowluma_docker_volume_paths(account)
-    shm = str(getattr(config, "pallas_protocol_snowluma_docker_shm_size", "") or "").strip() or "1g"
-    vnc_pw = str(getattr(config, "pallas_protocol_snowluma_docker_vnc_passwd", "") or "").strip()
+    shm = (
+        str(
+            getattr(config, "pallas_protocol_snowluma_docker_shm_size", "") or ""
+        ).strip()
+        or "1g"
+    )
+    vnc_pw = str(
+        getattr(config, "pallas_protocol_snowluma_docker_vnc_passwd", "") or ""
+    ).strip()
 
     argv: list[str] = [
         "run",
@@ -141,8 +163,14 @@ def build_snowluma_docker_run_argv(account: dict, config: Any, resolve_qq) -> li
 
     novnc = snowluma_docker_effective_host_novnc_port(account, config)
     vnc = snowluma_docker_effective_host_vnc_port(account, config)
-    in_novnc = int(getattr(config, "pallas_protocol_snowluma_docker_internal_novnc_port", 6081) or 6081)
-    in_vnc = int(getattr(config, "pallas_protocol_snowluma_docker_internal_vnc_port", 5900) or 5900)
+    in_novnc = int(
+        getattr(config, "pallas_protocol_snowluma_docker_internal_novnc_port", 6081)
+        or 6081
+    )
+    in_vnc = int(
+        getattr(config, "pallas_protocol_snowluma_docker_internal_vnc_port", 5900)
+        or 5900
+    )
     if 1 <= novnc <= 65535:
         argv.extend(["-p", f"{novnc}:{in_novnc}"])
     if 1 <= vnc <= 65535:

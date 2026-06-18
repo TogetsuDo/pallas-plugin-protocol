@@ -3,7 +3,13 @@ from datetime import datetime
 from pathlib import Path
 
 from nonebot import on_command
-from nonebot.adapters.onebot.v11 import Bot, Message, MessageEvent, MessageSegment, PrivateMessageEvent, permission
+from nonebot.adapters.onebot.v11 import (
+    Bot,
+    Message,
+    MessageEvent,
+    MessageSegment,
+    PrivateMessageEvent,
+)
 from nonebot.params import ArgPlainText, CommandArg
 from nonebot.permission import SUPERUSER
 from nonebot.plugin import PluginMetadata
@@ -16,7 +22,7 @@ from src.features.cmd_perm.metadata_defaults import (
     PLUGIN_MENU_TEMPLATE,
 )
 from src.features.cmd_perm.metadata_text import SCENE_PRIVATE, join_usage, usage_line
-from src.foundation.config import BotConfig, user_is_bot_admin
+from src.foundation.config import user_is_bot_admin
 from src.foundation.db import make_bot_config_repository
 from src.platform.bot_runtime.roles import is_hub_role
 
@@ -45,7 +51,11 @@ __plugin_meta__ = PluginMetadata(
         "version": PLUGIN_EXTRA_VERSION,
         "menu_template": PLUGIN_MENU_TEMPLATE,
         "command_permissions": [
-            {"id": "relogin.relogin", "label": "牛牛重新上号", "default": "bot_moderator"},
+            {
+                "id": "relogin.relogin",
+                "label": "牛牛重新上号",
+                "default": "bot_moderator",
+            },
             {"id": "relogin.create", "label": "创建牛牛", "default": "superuser"},
         ],
         "menu_data": [
@@ -78,7 +88,10 @@ relogin_cmd = on_command(
     permission=private_message_permission_for_command("relogin.relogin"),
 )
 create_cmd = on_command(
-    "创建牛牛", priority=5, block=True, permission=private_message_permission_for_command("relogin.create")
+    "创建牛牛",
+    priority=5,
+    block=True,
+    permission=private_message_permission_for_command("relogin.create"),
 )
 
 _CANCEL_WORDS = {"取消", "cancel", "退出", "quit"}
@@ -97,7 +110,9 @@ def _extract_qq(arg: str) -> str:
     return text if text.isdigit() else ""
 
 
-async def _wait_qrcode(account_data_dir: Path, since: datetime, timeout_sec: int = 60) -> Path | None:
+async def _wait_qrcode(
+    account_data_dir: Path, since: datetime, timeout_sec: int = 60
+) -> Path | None:
     qr_path = account_data_dir / "cache" / "qrcode.png"
     deadline = asyncio.get_running_loop().time() + timeout_sec
     while asyncio.get_running_loop().time() < deadline:
@@ -113,7 +128,9 @@ async def _wait_qrcode(account_data_dir: Path, since: datetime, timeout_sec: int
 
 
 @relogin_cmd.handle()
-async def _relogin_handle(event: MessageEvent, state: T_State, args: Message = CommandArg()):  # noqa: B008
+async def _relogin_handle(
+    event: MessageEvent, state: T_State, args: Message = CommandArg()
+):  # noqa: B008
     if not isinstance(event, PrivateMessageEvent):
         await relogin_cmd.finish("请私聊使用该命令。")
 
@@ -125,7 +142,9 @@ async def _relogin_handle(event: MessageEvent, state: T_State, args: Message = C
 
 
 @relogin_cmd.got("qq")
-async def _relogin_got_qq(bot: Bot, event: MessageEvent, state: T_State, qq_input: str = ArgPlainText("qq")):  # noqa: B008
+async def _relogin_got_qq(
+    bot: Bot, event: MessageEvent, state: T_State, qq_input: str = ArgPlainText("qq")
+):  # noqa: B008
     if qq_input.strip() in _CANCEL_WORDS:
         await relogin_cmd.finish("已取消重新上号。")
 
@@ -167,7 +186,9 @@ async def _relogin_got_nickname(
         if not nickname:
             await relogin_cmd.reject("昵称不能为空，请重新输入：")
         try:
-            protocol_manager.create_account({"qq": qq, "display_name": nickname, "enabled": True})
+            protocol_manager.create_account(
+                {"qq": qq, "display_name": nickname, "enabled": True}
+            )
             await bot.send(event, f"已创建 {nickname} 并继续上号流程。")
         except Exception as e:
             await relogin_cmd.finish(f"自动创建协议端失败：{e}")
@@ -186,7 +207,9 @@ async def _relogin_got_nickname(
 
     qr_path = await _wait_qrcode(account_data_dir, started_at)
     if qr_path is None:
-        await relogin_cmd.finish("已完成启动，但在 60 秒内未检测到新的二维码文件，请寻找号主上报情况")
+        await relogin_cmd.finish(
+            "已完成启动，但在 60 秒内未检测到新的二维码文件，请寻找号主上报情况"
+        )
 
     try:
         qr_bytes = qr_path.read_bytes()
@@ -197,7 +220,9 @@ async def _relogin_got_nickname(
 
 
 @create_cmd.handle()
-async def _create_handle(event: MessageEvent, state: T_State, args: Message = CommandArg()):  # noqa: B008
+async def _create_handle(
+    event: MessageEvent, state: T_State, args: Message = CommandArg()
+):  # noqa: B008
     if not isinstance(event, PrivateMessageEvent):
         await create_cmd.finish("请私聊使用该命令。")
 
@@ -205,7 +230,9 @@ async def _create_handle(event: MessageEvent, state: T_State, args: Message = Co
     if text:
         parts = text.split()
         if len(parts) < 3:  # noqa: PLR2004
-            await create_cmd.finish("参数不足，需要：牛牛昵称 牛牛账号 号主账号（至少一个）")
+            await create_cmd.finish(
+                "参数不足，需要：牛牛昵称 牛牛账号 号主账号（至少一个）"
+            )
         display_name, qq, *owner_qqs = parts
         if not qq.isdigit() or len(qq) < 5:  # noqa: PLR2004
             await create_cmd.finish("牛牛账号格式不正确")
@@ -223,7 +250,9 @@ async def _create_handle(event: MessageEvent, state: T_State, args: Message = Co
 
 
 @create_cmd.got("display_name")
-async def _create_got_name(state: T_State, display_name_input: str = ArgPlainText("display_name")):  # noqa: B008
+async def _create_got_name(
+    state: T_State, display_name_input: str = ArgPlainText("display_name")
+):  # noqa: B008
     if display_name_input.strip() in _CANCEL_WORDS:
         await create_cmd.finish("已取消创建牛牛。")
     if not display_name_input.strip():
@@ -260,13 +289,17 @@ async def _create_got_owners(
 
     invalid = [oq for oq in owner_qqs if not oq.isdigit()]
     if invalid:
-        await create_cmd.reject(f"号主账号格式不正确：{'、'.join(invalid)}，请重新输入：")
+        await create_cmd.reject(
+            f"号主账号格式不正确：{'、'.join(invalid)}，请重新输入："
+        )
 
     display_name = display_name_input.strip()
     qq = qq_input.strip()
 
     try:
-        protocol_manager.create_account({"qq": qq, "display_name": display_name, "enabled": True})
+        protocol_manager.create_account(
+            {"qq": qq, "display_name": display_name, "enabled": True}
+        )
     except Exception as e:
         await create_cmd.finish(f"创建账号失败：{e}")
 
@@ -302,5 +335,11 @@ async def _create_got_owners(
             await bot.send(event, f"二维码读取失败：{e}")
 
     owners_str = "、".join(owner_qqs)
-    timeout_hint = "\n但在 60 秒内未检测到新的二维码文件，请到协议端控制台查看或联系管理员。" if qr_path is None else ""
-    await create_cmd.finish(f"{display_name}：{qq} 已创建并启动。\n号主：{owners_str}{timeout_hint}")
+    timeout_hint = (
+        "\n但在 60 秒内未检测到新的二维码文件，请到协议端控制台查看或联系管理员。"
+        if qr_path is None
+        else ""
+    )
+    await create_cmd.finish(
+        f"{display_name}：{qq} 已创建并启动。\n号主：{owners_str}{timeout_hint}"
+    )

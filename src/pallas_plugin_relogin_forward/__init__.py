@@ -68,14 +68,18 @@ async def relogin_forward_rule(bot: Bot, event: PrivateMessageEvent) -> bool:
     return False
 
 
-async def apply_relogin_result(bot: Bot, event: PrivateMessageEvent, result: ReloginHandleResult) -> None:
+async def apply_relogin_result(
+    bot: Bot, event: PrivateMessageEvent, result: ReloginHandleResult
+) -> None:
     for item in result.replies:
         await send_reply_item(bot, event, item)
     if result.reject_hint:
         await bot.send(event, result.reject_hint)
 
 
-async def send_reply_item(bot: Bot, event: PrivateMessageEvent, item: ReplyItem) -> None:
+async def send_reply_item(
+    bot: Bot, event: PrivateMessageEvent, item: ReplyItem
+) -> None:
     if item.kind == "text":
         await bot.send(event, item.content)
         return
@@ -110,7 +114,12 @@ async def relogin_forward_handler(bot: Bot, event: PrivateMessageEvent):
         _active_sessions.discard(key)
         return
 
-    if key in _active_sessions and not result.replies and not result.reject_hint and not result.session_active:
+    if (
+        key in _active_sessions
+        and not result.replies
+        and not result.reject_hint
+        and not result.session_active
+    ):
         await bot.send(event, "会话已过期，请重新发送「牛牛重新上号」或「创建牛牛」。")
         _active_sessions.discard(key)
         return

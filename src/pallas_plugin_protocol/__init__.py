@@ -14,7 +14,12 @@ from src.features.cmd_perm.metadata_defaults import (
 from src.features.cmd_perm.metadata_text import join_usage, usage_line
 from src.foundation.paths import plugin_data_dir
 
-from .config import Config, get_pallas_protocol_config, plugin_config, resolve_protocol_webui_base_path
+from .config import (
+    Config as Config,
+    get_pallas_protocol_config,
+    plugin_config,
+    resolve_protocol_webui_base_path,
+)
 from .service import PallasProtocolService
 from .web import register_pallas_protocol_routes
 
@@ -54,7 +59,9 @@ __plugin_meta__ = PluginMetadata(
 
 app = get_app()
 driver = get_driver()
-manager = PallasProtocolService(plugin_data_dir("pallas_protocol"), get_pallas_protocol_config())
+manager = PallasProtocolService(
+    plugin_data_dir("pallas_protocol"), get_pallas_protocol_config()
+)
 
 register_pallas_protocol_routes(app, manager=manager, plugin_config=plugin_config)
 

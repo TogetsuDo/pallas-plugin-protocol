@@ -66,7 +66,13 @@ def _next_port(accounts: dict, lo: int = 6099, hi: int = 7999) -> int:
 
 
 def _sync_configs(
-    config_dir: Path, qq: str, webui_port: int, webui_token: str, ws_url: str, ws_name: str, ws_token: str
+    config_dir: Path,
+    qq: str,
+    webui_port: int,
+    webui_token: str,
+    ws_url: str,
+    ws_name: str,
+    ws_token: str,
 ) -> None:
     # webui.json
     wp = config_dir / "webui.json"
@@ -99,8 +105,12 @@ def _sync_configs(
     preferred = [config_dir / f"onebot11_{qq}.json", config_dir / f"onebot_{qq}.json"]
     ob_path = next((p for p in preferred if p.exists()), None)
     if ob_path is None:
-        has_legacy = any(p.name.startswith("onebot_") for p in config_dir.glob("onebot_*.json"))
-        ob_path = config_dir / (f"onebot_{qq}.json" if has_legacy else f"onebot11_{qq}.json")
+        has_legacy = any(
+            p.name.startswith("onebot_") for p in config_dir.glob("onebot_*.json")
+        )
+        ob_path = config_dir / (
+            f"onebot_{qq}.json" if has_legacy else f"onebot11_{qq}.json"
+        )
     od = _safe_json(ob_path)
     if not isinstance(od.get("network"), dict):
         od["network"] = {}
@@ -158,12 +168,16 @@ def run_import(
     for folder in subfolders:
         config_dir = folder / "config"
         if not config_dir.is_dir():
-            result.skipped.append({"folder": folder.name, "reason": "没有 config/ 子目录"})
+            result.skipped.append(
+                {"folder": folder.name, "reason": "没有 config/ 子目录"}
+            )
             continue
 
         qq = _extract_qq(config_dir)
         if not qq:
-            result.failed.append({"folder": folder.name, "reason": "无法从 config/ 提取 QQ 号"})
+            result.failed.append(
+                {"folder": folder.name, "reason": "无法从 config/ 提取 QQ 号"}
+            )
             continue
 
         if skip_existing and qq in accounts:
@@ -175,7 +189,11 @@ def run_import(
 
         # 决定 account_data_dir：优先使用 instances_root/<qq>/napcat/，否则原地注册
         if instances_root is not None:
-            account_data_dir = str((instances_root / qq / normalize_instance_folder_segment("napcat")).resolve())
+            account_data_dir = str(
+                (
+                    instances_root / qq / normalize_instance_folder_segment("napcat")
+                ).resolve()
+            )
         else:
             account_data_dir = str(folder.resolve())
 
@@ -202,7 +220,9 @@ def run_import(
         if not dry_run:
             if instances_root is not None:
                 # 将数据复制到 instances_root/<qq>/<napcat>/
-                inst_dir = instances_root / qq / normalize_instance_folder_segment("napcat")
+                inst_dir = (
+                    instances_root / qq / normalize_instance_folder_segment("napcat")
+                )
                 inst_config_dir = inst_dir / "config"
                 inst_config_dir.mkdir(parents=True, exist_ok=True)
                 # 复制 config/ 下的所有文件
@@ -222,11 +242,21 @@ def run_import(
                     shutil.copytree(str(qq_src_legacy), str(inst_qq_dst))
                     qq_copied = str(inst_qq_dst)
                 # 在 instances 目录写入最终配置
-                _sync_configs(inst_config_dir, qq, webui_port, webui_token, ws_url, ws_name, ws_token)
+                _sync_configs(
+                    inst_config_dir,
+                    qq,
+                    webui_port,
+                    webui_token,
+                    ws_url,
+                    ws_name,
+                    ws_token,
+                )
             else:
                 # 原地注册：在源目录写入配置
                 config_dir.mkdir(parents=True, exist_ok=True)
-                _sync_configs(config_dir, qq, webui_port, webui_token, ws_url, ws_name, ws_token)
+                _sync_configs(
+                    config_dir, qq, webui_port, webui_token, ws_url, ws_name, ws_token
+                )
                 qq_src = folder / "QQ"
                 qq_dst = folder / ".config" / "QQ"
                 if qq_src.is_dir() and not qq_dst.exists():
@@ -235,12 +265,14 @@ def run_import(
                     qq_copied = str(qq_dst)
 
         accounts[qq] = account
-        result.imported.append({
-            "folder": folder.name,
-            "qq": qq,
-            "webui_port": webui_port,
-            "account_data_dir": account_data_dir,
-            **({"qq_copied_to": qq_copied} if qq_copied else {}),
-        })
+        result.imported.append(
+            {
+                "folder": folder.name,
+                "qq": qq,
+                "webui_port": webui_port,
+                "account_data_dir": account_data_dir,
+                **({"qq_copied_to": qq_copied} if qq_copied else {}),
+            }
+        )
 
     return result, accounts
