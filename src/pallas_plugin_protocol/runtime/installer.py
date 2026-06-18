@@ -24,13 +24,13 @@ from urllib.parse import urlparse
 
 import httpx
 
-from src.shared.utils.github_release import (
+from pallas.api.utils import (
     fetch_github_releases,
     github_auth_headers,
     github_release_api_url,
     github_release_asset_url,
 )
-from src.shared.utils.stream_download import (
+from pallas.api.utils import (
     StreamDownloadProgress,
     format_download_byte_size,
     sync_stream_download_to_file,

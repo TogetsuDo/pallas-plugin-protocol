@@ -9,16 +9,16 @@ from nonebot.adapters.onebot.v11 import Bot, MessageSegment, PrivateMessageEvent
 from nonebot.plugin import PluginMetadata
 from nonebot.rule import Rule
 
-from src.features.cmd_perm import satisfies_command_permission
-from src.features.cmd_perm.metadata_defaults import (
+from pallas.api.perm import satisfies_command_permission
+from pallas.api.metadata import (
     PLUGIN_EXTRA_VERSION,
     PLUGIN_HOMEPAGE,
     PLUGIN_MENU_TEMPLATE,
 )
-from src.features.cmd_perm.metadata_text import SCENE_PRIVATE, join_usage, usage_line
-from src.platform.bot_runtime.roles import is_sharded_worker
-from src.platform.shard.coord.relogin_payload import ReloginHandleResult, ReplyItem  # noqa: TC001
-from src.platform.shard.coord.relogin_worker_forward import forward_relogin_to_hub
+from pallas.api.metadata import SCENE_PRIVATE, join_usage, usage_line
+from pallas.api.platform import is_sharded_worker
+from pallas.core.platform.shard.coord.relogin_payload import ReloginHandleResult, ReplyItem  # noqa: TC001
+from pallas.core.platform.shard.coord.relogin_worker_forward import forward_relogin_to_hub
 
 __plugin_meta__ = PluginMetadata(
     name="牛牛重新上号转发",

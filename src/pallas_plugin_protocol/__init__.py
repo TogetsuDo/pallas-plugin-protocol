@@ -4,15 +4,15 @@ import logging
 from nonebot import get_app, get_driver, logger
 from nonebot.plugin import PluginMetadata
 
-from src.console.web import public_base_url
-from src.console.webui.console_login import prime_shared_console_login
-from src.features.cmd_perm.metadata_defaults import (
+from pallas.console.web import public_base_url
+from pallas.console.webui.console_login import prime_shared_console_login
+from pallas.api.metadata import (
     PLUGIN_EXTRA_VERSION,
     PLUGIN_HOMEPAGE,
     PLUGIN_MENU_TEMPLATE,
 )
-from src.features.cmd_perm.metadata_text import join_usage, usage_line
-from src.foundation.paths import plugin_data_dir
+from pallas.api.metadata import join_usage, usage_line
+from pallas.api.paths import plugin_data_dir
 
 from .config import (
     Config as Config,

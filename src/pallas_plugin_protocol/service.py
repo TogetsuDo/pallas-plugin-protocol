@@ -14,7 +14,7 @@ from urllib.parse import quote
 
 import httpx
 
-from src.foundation.paths import resource_dir
+from pallas.api.paths import resource_dir
 
 from .backends import ProtocolRuntimeBackend, make_protocol_runtime_backend
 from .config import (
@@ -1183,7 +1183,7 @@ class PallasProtocolService:
             json.dumps(self._accounts, ensure_ascii=False, indent=2), encoding="utf-8"
         )
         try:
-            from src.platform.multi_bot.fleet import invalidate_fleet_bot_cache
+            from pallas.api.platform import invalidate_fleet_bot_cache
 
             invalidate_fleet_bot_cache()
         except Exception:
@@ -1440,8 +1440,8 @@ class PallasProtocolService:
         if account_id in self._accounts:
             raise ValueError("该 QQ 对应账号已存在")
 
-        from src.platform.shard import context as shard_ctx
-        from src.platform.shard.registry.store import assign_bot_to_shard
+        from pallas.core.platform.shard import context as shard_ctx
+        from pallas.core.platform.shard.registry.store import assign_bot_to_shard
 
         if shard_ctx.sharding_active():
             assign_bot_to_shard(qq)
@@ -2223,10 +2223,10 @@ class PallasProtocolService:
         if not qq or not qq.isdigit():
             return False
         try:
-            from src.platform.shard import context as shard_ctx
+            from pallas.core.platform.shard import context as shard_ctx
 
             if shard_ctx.sharding_active() and shard_ctx.is_hub():
-                from src.platform.shard.presence import get_cluster_online_bot_ids
+                from pallas.api.platform import get_cluster_online_bot_ids
 
                 return int(qq) in get_cluster_online_bot_ids()
         except Exception:

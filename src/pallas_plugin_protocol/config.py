@@ -6,8 +6,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.console.webui import install_hot_reload_config, plugin_config_proxy
-from src.console.webui.field_help import field_help
+from pallas.api.config import install_hot_reload_config, plugin_config_proxy
+from pallas.api.config import field_help
 
 from .contract import resolve_public_mount_path
 from .runtime.installer import (
@@ -561,8 +561,8 @@ def resolve_onebot_ws_settings(
     """默认返回 hub/全局 WS；分片开启且提供 ``bot_id`` 时返回该牛所在 worker 的 WS。"""
     if bot_id:
         try:
-            from src.platform.shard import context as shard_ctx
-            from src.platform.shard.registry.store import resolve_onebot_ws_url_for_bot
+            from pallas.core.platform.shard import context as shard_ctx
+            from pallas.core.platform.shard.registry.store import resolve_onebot_ws_url_for_bot
 
             if shard_ctx.sharding_active():
                 url, name, tok = resolve_onebot_ws_url_for_bot(
