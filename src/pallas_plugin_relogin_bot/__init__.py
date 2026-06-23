@@ -25,11 +25,14 @@ from pallas.api.metadata import SCENE_PRIVATE, join_usage, usage_line
 from pallas.api.config import user_is_bot_admin
 from pallas.core.foundation.db import make_bot_config_repository
 from pallas.api.platform import is_hub_role
+from pallas.product.llm.knowledge.declare import knowledge_source_row
 
 if is_hub_role():
     from nonebot import get_app
 
-    from pallas.core.platform.shard.coord.relogin_hub_routes import mount_relogin_hub_routes
+    from pallas.core.platform.shard.coord.relogin_hub_routes import (
+        mount_relogin_hub_routes,
+    )
 
     mount_relogin_hub_routes(get_app())
 
@@ -77,6 +80,39 @@ __plugin_meta__ = PluginMetadata(
                 "brief_des": "创建并启动新牛牛账号（仅超管）",
                 "detail_des": "在协议端创建账号并启动，私聊回传登录二维码",
             },
+        ],
+        "knowledge_sources": [
+            knowledge_source_row(
+                source_id="relogin.faq",
+                title="牛牛重新上号说明",
+                description="协议端重启与登录二维码",
+                chunks=[
+                    {
+                        "title": "重新上号",
+                        "content": (
+                            "私聊发送「牛牛重新上号 [QQ号]」可重启协议端账号并在私聊推送登录二维码；"
+                            "号主或 bot 管理员可用。"
+                        ),
+                        "keywords": "重新上号,登录,二维码,掉线,重启",
+                    },
+                    {
+                        "title": "创建牛牛",
+                        "content": (
+                            "超管私聊「创建牛牛 …」可在协议端新建实例并回传二维码；"
+                            "属于维护者向操作。"
+                        ),
+                        "keywords": "创建牛牛,新建,超管,实例",
+                    },
+                    {
+                        "title": "与协议端管理页的分工",
+                        "content": (
+                            "Web 协议端管理页（/protocol/console）供维护者图形化管理；"
+                            "普通用户掉线优先用「牛牛重新上号」口令。"
+                        ),
+                        "keywords": "协议端,控制台,管理页,分工",
+                    },
+                ],
+            ),
         ],
     },
 )
