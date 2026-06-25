@@ -61,6 +61,10 @@ __plugin_meta__ = PluginMetadata(
             },
             {"id": "relogin.create", "label": "创建牛牛", "default": "superuser"},
         ],
+        "command_limits": [
+            {"id": "relogin.relogin", "cd_sec": 60},
+            {"id": "relogin.create", "cd_sec": 120},
+        ],
         "menu_data": [
             {
                 "func": "重新上号",
