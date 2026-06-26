@@ -17,8 +17,13 @@ from pallas.api.metadata import (
 )
 from pallas.api.metadata import SCENE_PRIVATE, join_usage, usage_line
 from pallas.api.platform import is_sharded_worker
-from pallas.core.platform.shard.coord.relogin_payload import ReloginHandleResult, ReplyItem  # noqa: TC001
-from pallas.core.platform.shard.coord.relogin_worker_forward import forward_relogin_to_hub
+from pallas.core.platform.shard.coord.relogin_payload import (
+    ReloginHandleResult,
+    ReplyItem,
+)  # noqa: TC001
+from pallas.core.platform.shard.coord.relogin_worker_forward import (
+    forward_relogin_to_hub,
+)
 
 __plugin_meta__ = PluginMetadata(
     name="牛牛重新上号转发",

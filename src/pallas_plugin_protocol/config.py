@@ -562,7 +562,9 @@ def resolve_onebot_ws_settings(
     if bot_id:
         try:
             from pallas.core.platform.shard import context as shard_ctx
-            from pallas.core.platform.shard.registry.store import resolve_onebot_ws_url_for_bot
+            from pallas.core.platform.shard.registry.store import (
+                resolve_onebot_ws_url_for_bot,
+            )
 
             if shard_ctx.sharding_active():
                 url, name, tok = resolve_onebot_ws_url_for_bot(
