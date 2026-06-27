@@ -5,6 +5,9 @@
 
 ## [Unreleased]
 
+## [4.0.14] - 2026-06-27
+- docs(readme): 「怎么使用」口令统一加行内代码标记
+
 ## [4.0.13] - 2026-06-27
 
 - fix(web): 补 `web/contract.py`，修复 pages_pkg 引用 `pallas_plugin_protocol.web.contract` 导致插件 import 失败

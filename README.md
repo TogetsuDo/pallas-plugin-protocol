@@ -58,7 +58,7 @@ uv pip install pallas-plugin-protocol
 | 入口 | 说明 |
 | --- | --- |
 | `/protocol/console/` | 协议端管理页（维护者向） |
-| Web 控制台 | 侧边栏可跳转协议端 |
+| `Web 控制台` | 侧边栏可跳转协议端 |
 
 典型流程：登录控制台 → 创建实例 → 配置反向 WS → 启动。Docker 下注意 `PALLAS_PROTOCOL_DOCKER_ONEBOT_HOST`。
 
@@ -77,8 +77,8 @@ uv pip install pallas-plugin-protocol
 
 | 口令 | 场景 | 说明 |
 | --- | --- | --- |
-| 牛牛重新上号 [QQ] | 私聊 | 号主重启本账号协议端 |
-| 创建牛牛 … | 私聊 | 超管新建实例 |
+| `牛牛重新上号 [QQ]` | 私聊 | 号主重启本账号协议端 |
+| `创建牛牛 …` | 私聊 | 超管新建实例 |
 
 | 命令 ID | 默认等级 |
 | --- | --- |
