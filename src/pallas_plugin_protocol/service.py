@@ -16,6 +16,14 @@ import httpx
 
 from pallas.api.paths import resource_dir
 
+from .account_batch import AccountBatchCoordinator
+from .account_batch_ops import (
+    batch_defaults_from_config,
+    log_batch_job_failures,
+    resolve_batch_account_ids,
+    start_account_batch_job,
+    wait_batch_job,
+)
 from .backends import ProtocolRuntimeBackend, make_protocol_runtime_backend
 from .config import (
     Config,
@@ -105,6 +113,7 @@ class PallasProtocolService:
                 getattr(self._config, "pallas_protocol_webui_port_min", 6099)
             ),
         )
+        self._batch = AccountBatchCoordinator()
 
     def _protocol_runtime_backend(
         self, account: dict | None = None, *, kind: str | None = None
@@ -871,6 +880,33 @@ class PallasProtocolService:
     async def start_all_enabled_accounts(self) -> None:
         from nonebot import logger
 
+        ids = await self.collect_account_ids_for_autostart()
+        if not ids:
+            return
+        if len(ids) == 1:
+            try:
+                await self.start_account(ids[0])
+            except ValueError as e:
+                logger.warning(f"Pallas-Bot 协议端: 自动启动账号 {ids[0]} 失败：{e}")
+            except Exception:
+                logger.exception(
+                    f"Pallas-Bot 协议端: 自动启动账号 {ids[0]} 出现未预期异常"
+                )
+            return
+        try:
+            job_id = await start_account_batch_job(self, self._batch, "start", ids)
+            await wait_batch_job(self._batch, job_id)
+            log_batch_job_failures(
+                logger,
+                job_id,
+                self._batch,
+                prefix="Pallas-Bot 协议端: 自动启动",
+            )
+        except Exception:
+            logger.exception("Pallas-Bot 协议端: 批量自动启动账号出现未预期异常")
+
+    async def collect_account_ids_for_autostart(self) -> list[str]:
+        ids: list[str] = []
         for account_id, account in list(self._accounts.items()):
             if not bool(account.get("enabled", True)):
                 continue
@@ -885,31 +921,38 @@ class PallasProtocolService:
                     continue
             if self.is_running(account_id):
                 continue
-            try:
-                await self.start_account(account_id)
-            except ValueError as e:
-                logger.warning(
-                    f"Pallas-Bot 协议端: 自动启动账号 {account_id} 失败：{e}"
-                )
-            except Exception:
-                logger.exception(
-                    f"Pallas-Bot 协议端: 自动启动账号 {account_id} 出现未预期异常"
-                )
+            ids.append(account_id)
+        return ids
 
     async def stop_all_enabled_accounts(self) -> None:
         from nonebot import logger
 
-        for account_id, account in list(self._accounts.items()):
-            if not bool(account.get("enabled", True)):
-                continue
-            if not self.is_running(account_id):
-                continue
+        ids = [
+            account_id
+            for account_id, account in list(self._accounts.items())
+            if bool(account.get("enabled", True)) and self.is_running(account_id)
+        ]
+        if not ids:
+            return
+        if len(ids) == 1:
             try:
-                await self.stop_account(account_id)
+                await self.stop_account(ids[0])
             except Exception:
                 logger.exception(
-                    f"Pallas-Bot 协议端: 自动停止账号 {account_id} 出现未预期异常"
+                    f"Pallas-Bot 协议端: 自动停止账号 {ids[0]} 出现未预期异常"
                 )
+            return
+        try:
+            job_id = await start_account_batch_job(self, self._batch, "stop", ids)
+            await wait_batch_job(self._batch, job_id)
+            log_batch_job_failures(
+                logger,
+                job_id,
+                self._batch,
+                prefix="Pallas-Bot 协议端: 自动停止",
+            )
+        except Exception:
+            logger.exception("Pallas-Bot 协议端: 批量自动停止账号出现未预期异常")
 
     def _snowluma_docker_mapped_host_ports_on_account(self, account: dict) -> set[int]:
         ports: set[int] = set()
@@ -2133,6 +2176,34 @@ class PallasProtocolService:
     async def restart_account(self, account_id: str) -> dict:
         await self.stop_account(account_id)
         return await self.start_account(account_id)
+
+    def batch_coordinator(self) -> AccountBatchCoordinator:
+        return self._batch
+
+    def resolve_batch_account_ids(self, raw_ids: list[str] | None) -> list[str]:
+        return resolve_batch_account_ids(self._accounts, raw_ids)
+
+    def batch_defaults(self) -> dict[str, int | float | str]:
+        return batch_defaults_from_config(self._config)
+
+    async def start_account_batch(
+        self,
+        action: str,
+        account_ids: list[str] | None = None,
+        *,
+        mode: str | None = None,
+        max_concurrency: int | None = None,
+        stagger_ms: int | None = None,
+    ) -> str:
+        return await start_account_batch_job(
+            self,
+            self._batch,
+            action,
+            account_ids,
+            mode=mode,
+            max_concurrency=max_concurrency,
+            stagger_ms=stagger_ms,
+        )
 
     def tail_logs(self, account_id: str, lines: int = 200) -> list[str]:
         if lines <= 0:

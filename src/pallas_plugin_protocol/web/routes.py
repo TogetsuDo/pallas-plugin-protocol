@@ -974,6 +974,81 @@ def register_pallas_protocol_routes(
             raise HTTPException(status_code=400, detail=str(e)) from e
         return {"account": account}
 
+    @app.post(f"{base}/api/accounts/batch")
+    async def accounts_batch(
+        payload: dict[str, Any],
+        token: str | None = Query(default=None),
+        x_pallas_protocol_token: str | None = Header(
+            default=None, alias="X-Pallas-Protocol-Token"
+        ),
+    ):
+        _auth(x_pallas_protocol_token, token)
+        body = payload if isinstance(payload, dict) else {}
+        action = str(body.get("action", "") or "").strip().lower()
+        raw_ids = body.get("account_ids")
+        ids: list[str] | None = None
+        if isinstance(raw_ids, list):
+            ids = [str(x) for x in raw_ids]
+        mode = body.get("mode")
+        max_concurrency = body.get("max_concurrency")
+        stagger_ms = body.get("stagger_ms")
+        try:
+            job_id = await manager.start_account_batch(
+                action,
+                ids,
+                mode=str(mode).strip().lower() if mode is not None else None,
+                max_concurrency=int(max_concurrency)
+                if max_concurrency is not None
+                else None,
+                stagger_ms=int(stagger_ms) if stagger_ms is not None else None,
+            )
+        except KeyError as e:
+            raise HTTPException(status_code=404, detail=str(e)) from e
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        job = manager.batch_coordinator().job_to_dict(job_id)
+        return {"ok": True, "job_id": job_id, "job": job}
+
+    @app.get(f"{base}/api/accounts/batch/{{job_id}}")
+    async def accounts_batch_status(
+        job_id: str,
+        token: str | None = Query(default=None),
+        x_pallas_protocol_token: str | None = Header(
+            default=None, alias="X-Pallas-Protocol-Token"
+        ),
+    ):
+        _auth(x_pallas_protocol_token, token)
+        job = manager.batch_coordinator().job_to_dict(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="批量任务不存在")
+        return {"job": job}
+
+    @app.get(f"{base}/api/accounts/batch/{{job_id}}/stream")
+    async def accounts_batch_stream(
+        job_id: str,
+        token: str | None = Query(default=None),
+        x_pallas_protocol_token: str | None = Header(
+            default=None, alias="X-Pallas-Protocol-Token"
+        ),
+    ):
+        _auth(x_pallas_protocol_token, token)
+        if manager.batch_coordinator().get_job(job_id) is None:
+            raise HTTPException(status_code=404, detail="批量任务不存在")
+
+        async def _iter():
+            async for chunk in manager.batch_coordinator().subscribe_sse(job_id):
+                yield chunk
+
+        return StreamingResponse(
+            _iter(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
     @app.post(f"{base}/api/accounts/{{account_id}}/snowluma/inject-hook")
     async def snowluma_inject_hook(
         account_id: str,

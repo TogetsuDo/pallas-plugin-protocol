@@ -299,6 +299,24 @@ class Config(BaseModel):
             "开启便于无人值守；手动管理时可关闭",
         ),
     )
+    pallas_protocol_restart_max_concurrency: int = Field(
+        default=2,
+        ge=1,
+        le=8,
+        description=field_help(
+            "批量重启/启停时的最大并发数",
+            "parallel 模式生效；rolling 模式用于上限保护",
+        ),
+    )
+    pallas_protocol_restart_stagger_s: float = Field(
+        default=3.0,
+        ge=0.0,
+        le=120.0,
+        description=field_help(
+            "rolling 批量启动/重启时，相邻实例间隔秒数",
+            "降低 Docker 与 CPU 峰值；0 表示无间隔",
+        ),
+    )
     pallas_protocol_docker_network_mode: str = Field(
         default="bridge",
         description=field_help(

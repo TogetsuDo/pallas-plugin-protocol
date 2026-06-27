@@ -13,11 +13,17 @@ dependencies = [
 [dependency-groups]
 dev = [
     "ruff>=0.11.13",
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
 ]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/pallas_plugin_protocol", "src/pallas_plugin_relogin_bot", "src/pallas_plugin_relogin_forward"]

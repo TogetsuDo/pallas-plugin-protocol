@@ -1621,6 +1621,44 @@ html[data-theme="light"] .shell__brand:hover .shell__brand-mark {
     min-width: 0;
   }
 }
+.proto-webui-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--card));
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--bd));
+  border-radius: var(--radius-md);
+}
+.proto-webui-banner__main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: min(100%, 280px);
+  flex: 1 1 240px;
+}
+.proto-webui-banner__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+@media (max-width: 560px) {
+  .proto-webui-banner {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .proto-webui-banner__links .btn {
+    flex: 1 1 calc(50% - 4px);
+    min-width: 0;
+  }
+  .proto-webui-banner__links .btn.btn--primary {
+    flex-basis: 100%;
+  }
+}
 .panel.proto-panel {
   display: block;
   background: var(--card);
@@ -2130,4 +2168,43 @@ body.shell-mobile-nav-open {
 }
 html[data-theme="light"] .shell-mobile-nav__link:hover {
   background: rgba(15, 23, 42, 0.05);
+}
+
+.proto-batch-progress {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--card) 92%, transparent);
+}
+.proto-batch-progress[hidden] {
+  display: none !important;
+}
+.proto-batch-progress__track {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+.proto-batch-progress__fill {
+  height: 100%;
+  width: 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), var(--accent-strong));
+  transition: width 0.25s var(--ease);
+}
+.proto-batch-progress__msg {
+  margin: 8px 0 0;
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+@media (max-width: 560px) {
+  .proto-panel__hd-batch {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .proto-panel__hd-batch > .btn {
+    flex: 1 1 calc(50% - 4px);
+    min-width: 0;
+  }
 }

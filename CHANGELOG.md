@@ -5,10 +5,17 @@
 
 ## [Unreleased]
 
+- feat(batch): 新增 `POST /api/accounts/batch` rolling/限流批量启停重启，SSE 进度流；配置项 `pallas_protocol_restart_max_concurrency` / `pallas_protocol_restart_stagger_s`
+- fix(web): 内置协议页批量操作改为 batch API，默认 rolling 降低峰值负载
+- refactor(batch): 批量编排逻辑抽到 `account_batch_ops`；Bot 启动/停止全部启用账号改走 rolling batch
+- feat(web): 内置仪表盘增加「推荐使用 Bot WebUI」引导横幅
+
 ## [4.0.10] - 2026-06-27
+
 - fix(config): 改为写入 `config/plugins.json` 禁用 NapCat 内置插件 `napcat-plugin-builtin`，真正阻止 `#napcat` 本地命令响应（4.0.9 写入的 `enableLocalCommand` 字段 NapCat 不识别，无效）
 
 ## [4.0.9] - 2026-06-27
+
 - fix(config): 同步 NapCat onebot11.json 时默认写入 `enableLocalCommand: false`，避免触发 `#napcat` 等本地命令（注：该字段 NapCat 不识别，已由 4.0.10 修正）
 
 ## [4.0.8] - 2026-06-25

@@ -538,6 +538,82 @@ def _render_common_api_js() -> str:
       }
     }
 
+    function setBatchProgressUi(visible, percent, message) {
+      let bar = document.getElementById("protoBatchProgress");
+      if (!bar) {
+        bar = document.createElement("div");
+        bar.id = "protoBatchProgress";
+        bar.className = "proto-batch-progress";
+        bar.innerHTML =
+          '<div class="proto-batch-progress__track"><div class="proto-batch-progress__fill"></div></div>'
+          + '<p class="proto-batch-progress__msg muted"></p>';
+        const panel = document.querySelector(".proto-panel--accounts .panel__bd");
+        if (panel) panel.prepend(bar);
+      }
+      const fill = bar.querySelector(".proto-batch-progress__fill");
+      const msg = bar.querySelector(".proto-batch-progress__msg");
+      bar.hidden = !visible;
+      if (fill) fill.style.width = Math.min(100, Math.max(0, percent)) + "%";
+      if (msg) msg.textContent = message || "";
+    }
+
+    async function waitBatchJob(jobId, options) {
+      options = options || {};
+      return new Promise((resolve, reject) => {
+        const tok = getSessionToken();
+        let url = basePath + "/api/accounts/batch/" + encodeURIComponent(jobId) + "/stream";
+        if (tok) url += "?token=" + encodeURIComponent(tok);
+        const es = new EventSource(url);
+        let settled = false;
+        const finish = (job, err) => {
+          if (settled) return;
+          settled = true;
+          try { es.close(); } catch (e) {}
+          if (err) reject(err);
+          else resolve(job);
+        };
+        const apply = (job) => {
+          if (!job) return;
+          const pct = job.total ? Math.round((job.completed || 0) * 100 / job.total) : 0;
+          const parts = [job.message, job.phase, job.current_account_id].filter(Boolean);
+          setBatchProgressUi(true, pct, parts.join(" · "));
+          if (typeof options.onProgress === "function") options.onProgress(job);
+          if (job.status && job.status !== "running") finish(job);
+        };
+        es.addEventListener("snapshot", (ev) => {
+          try { apply(JSON.parse(ev.data)); } catch (e) {}
+        });
+        es.addEventListener("progress", (ev) => {
+          try { apply(JSON.parse(ev.data)); } catch (e) {}
+        });
+        es.onerror = () => {
+          api("/api/accounts/batch/" + encodeURIComponent(jobId), { timeoutMs: 15000 })
+            .then((data) => finish(data.job))
+            .catch((e) => finish(null, e));
+        };
+      });
+    }
+
+    async function runAccountBatch(action, accountIds, options) {
+      options = options || {};
+      const body = { action: action, mode: options.mode || "rolling" };
+      if (Array.isArray(accountIds) && accountIds.length) body.account_ids = accountIds;
+      if (options.max_concurrency != null) body.max_concurrency = options.max_concurrency;
+      if (options.stagger_ms != null) body.stagger_ms = options.stagger_ms;
+      setBatchProgressUi(true, 0, "已提交批量任务…");
+      const data = await api("/api/accounts/batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        timeoutMs: 60000,
+      });
+      const jobId = data && data.job_id;
+      if (!jobId) throw new Error("批量任务未返回 job_id");
+      const job = await waitBatchJob(jobId, options);
+      setBatchProgressUi(false, 100, "");
+      return job;
+    }
+
     document.addEventListener("click", (e) => {
       const btn = e.target.closest("[data-action='logout']");
       if (!btn) return;
@@ -1075,6 +1151,11 @@ def render_dashboard(base_path: str, pallas_console_http_base: str = "/pallas") 
         path, active="dashboard", pallas_console_http_base=pallas_console_http_base
     )
     new_href = html_escape(f"{path}/new", quote=True)
+    webui_base = (pallas_console_http_base or "/pallas").rstrip("/") or "/pallas"
+    webui_protocol_href = html_escape(f"{webui_base}/protocol", quote=True)
+    webui_create_href = html_escape(f"{webui_base}/protocol/create", quote=True)
+    webui_import_href = html_escape(f"{webui_base}/protocol/import", quote=True)
+    webui_assets_href = html_escape(f"{webui_base}/protocol/assets", quote=True)
     return f"""<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -1085,6 +1166,18 @@ def render_dashboard(base_path: str, pallas_console_http_base: str = "/pallas") 
 <body data-base-path="{html_escape(path, quote=True)}">
   <input type="hidden" id="token" value="" autocomplete="off" />
 {shell_open}
+    <div class="proto-webui-banner" role="status">
+      <div class="proto-webui-banner__main">
+        <strong>推荐使用 Pallas Bot WebUI</strong>
+        <span class="muted">创建账号、批量导入与协议资产已并入 Bot 控制台，体验与窄屏布局更一致。</span>
+      </div>
+      <div class="proto-webui-banner__links">
+        <a class="btn btn--primary" href="{webui_protocol_href}">打开 WebUI 协议页</a>
+        <a class="btn secondary" href="{webui_create_href}">创建</a>
+        <a class="btn secondary" href="{webui_import_href}">导入</a>
+        <a class="btn secondary" href="{webui_assets_href}">资产</a>
+      </div>
+    </div>
     <div class="panel proto-panel proto-panel--accounts">
       <div class="panel__hd panel__hd--split proto-panel__hd">
         <h2 class="panel__title">协议账号</h2>
@@ -1529,9 +1622,10 @@ def render_dashboard(base_path: str, pallas_console_http_base: str = "/pallas") 
       }}
       btnLoad(btn, "停止中…");
       try {{
-        await Promise.all(ids.map((id) => api(`/api/accounts/${{id}}/stop`, {{ method: "POST" }})));
+        const job = await runAccountBatch("stop", ids);
         await refreshAccounts({{ silent: true }});
-        notify("已停止 " + ids.length + " 个账号", "warn");
+        const failed = (job.results || []).filter((r) => !r.ok).length;
+        notify(failed ? `已停止 ${{ids.length - failed}} 个，${{failed}} 个失败` : "已停止 " + ids.length + " 个账号", failed ? "warn" : "warn");
       }} catch (e) {{
         notify(e.message || e, "err");
       }} finally {{
@@ -1752,11 +1846,18 @@ def render_dashboard(base_path: str, pallas_console_http_base: str = "/pallas") 
       const allRunning = accountRows.every((a) => isAccountRunning(a));
       const action = allRunning ? "stop" : "start";
       const loadingText = allRunning ? "停止全部中…" : "启动全部中…";
+      if (!allRunning && !confirm("将按间隔依次启动全部实例，以降低系统负载。继续？")) return;
       btnLoad(btn, loadingText);
       try {{
-        await Promise.all(accountRows.map((a) => api(`/api/accounts/${{a.id}}/${{action}}`, {{ method: "POST" }})));
+        const job = await runAccountBatch(action, accountRows.map((a) => a.id));
         await refreshAccounts({{ silent: true }});
-        notify(allRunning ? "已停止全部实例" : "已启动全部实例", allRunning ? "warn" : "ok");
+        const failed = (job.results || []).filter((r) => !r.ok).length;
+        notify(
+          allRunning
+            ? (failed ? `停止完成，${{failed}} 个失败` : "已停止全部实例")
+            : (failed ? `启动完成，${{failed}} 个失败` : "已启动全部实例"),
+          failed ? "warn" : (allRunning ? "warn" : "ok")
+        );
       }} catch (e) {{
         notify(e.message || e, "err");
       }} finally {{
@@ -1769,11 +1870,13 @@ def render_dashboard(base_path: str, pallas_console_http_base: str = "/pallas") 
         notify("当前没有可操作实例", "warn");
         return;
       }}
+      if (!confirm("将先停止再按间隔依次重启全部实例（rolling），以降低峰值负载。继续？")) return;
       btnLoad(btn, "重启全部中…");
       try {{
-        await Promise.all(accountRows.map((a) => api(`/api/accounts/${{a.id}}/restart`, {{ method: "POST" }})));
+        const job = await runAccountBatch("restart", accountRows.map((a) => a.id));
         await refreshAccounts({{ silent: true }});
-        notify("已重启全部实例", "ok");
+        const failed = (job.results || []).filter((r) => !r.ok).length;
+        notify(failed ? `重启完成，${{failed}} 个失败` : "已重启全部实例", failed ? "warn" : "ok");
       }} catch (e) {{
         notify(e.message || e, "err");
       }} finally {{
