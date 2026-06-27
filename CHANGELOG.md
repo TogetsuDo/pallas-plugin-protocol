@@ -5,6 +5,12 @@
 
 ## [Unreleased]
 
+## [4.0.12] - 2026-06-27
+
+- style(web): 内置 WebUI 与主控制台全面对齐——CSS 三层同步（console-shared + shell-protocol）、Poppins、data-summary-card / data-conn-capsule、StatCard KPI、SVG 侧栏图标
+- feat(web): WebUI 引导横幅支持「不再显示」并 localStorage 记忆
+- refactor(web): `pages.py` 拆分为 `pages_pkg/`（shell / dashboard / forms / account）
+
 ## [4.0.11] - 2026-06-27
 
 - feat(batch): 新增 `POST /api/accounts/batch` rolling/限流批量启停重启，SSE 进度流；配置项 `pallas_protocol_restart_max_concurrency` / `pallas_protocol_restart_stagger_s`
