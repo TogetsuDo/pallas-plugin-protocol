@@ -5,6 +5,8 @@
 
 ## [Unreleased]
 
+## [4.0.11] - 2026-06-27
+
 - feat(batch): 新增 `POST /api/accounts/batch` rolling/限流批量启停重启，SSE 进度流；配置项 `pallas_protocol_restart_max_concurrency` / `pallas_protocol_restart_stagger_s`
 - fix(web): 内置协议页批量操作改为 batch API，默认 rolling 降低峰值负载
 - refactor(batch): 批量编排逻辑抽到 `account_batch_ops`；Bot 启动/停止全部启用账号改走 rolling batch
