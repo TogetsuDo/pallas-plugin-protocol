@@ -5,6 +5,10 @@
 
 ## [Unreleased]
 
+## [4.0.15] - 2026-06-27
+
+- style(web): 从 WebUI 同步 `console-shared.css`（窄屏与 AI 观测 Hub 样式）
+
 ## [4.0.14] - 2026-06-27
 - docs(readme): 「怎么使用」口令统一加行内代码标记
 
