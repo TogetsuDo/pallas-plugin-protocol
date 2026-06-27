@@ -5,6 +5,9 @@
 
 ## [Unreleased]
 
+## [4.0.9] - 2026-06-27
+- fix(config): 同步 NapCat onebot11.json 时默认写入 `enableLocalCommand: false`，避免触发 `#napcat` 等本地命令
+
 ## [4.0.8] - 2026-06-25
 - feat(metadata): 补充重新上号命令冷却声明
 
