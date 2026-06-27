@@ -82,8 +82,8 @@ uv pip install pallas-plugin-protocol
 
 | 命令 ID | 默认等级 |
 | --- | --- |
-| `relogin.relogin` | bot_moderator |
-| `relogin.create` | superuser |
+| `relogin.relogin` | 号主 |
+| `relogin.create` | 仅超管 |
 
 > 详细用法、限制条件和可用范围以帮助为主。
 

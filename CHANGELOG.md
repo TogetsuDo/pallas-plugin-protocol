@@ -5,6 +5,9 @@
 
 ## [Unreleased]
 
+## [4.0.16] - 2026-06-27
+- docs(readme): 命令权限默认等级改用中文展示
+
 ## [4.0.15] - 2026-06-27
 
 - style(web): 从 WebUI 同步 `console-shared.css`（窄屏与 AI 观测 Hub 样式）
