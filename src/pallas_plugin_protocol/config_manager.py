@@ -134,6 +134,7 @@ class AccountConfigManager:
         data.setdefault("musicSignUrl", "https://ss.xingzhige.com/music_card/card")
         data.setdefault("enableLocalFile2Url", False)
         data.setdefault("parseMultMsg", False)
+        data["enableLocalCommand"] = False
         data.setdefault("imageDownloadProxy", "")
         data.setdefault(
             "timeout",
