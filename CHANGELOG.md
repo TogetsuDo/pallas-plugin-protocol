@@ -5,6 +5,10 @@
 
 ## [Unreleased]
 
+## [4.0.13] - 2026-06-27
+
+- fix(web): 补 `web/contract.py`，修复 pages_pkg 引用 `pallas_plugin_protocol.web.contract` 导致插件 import 失败
+
 ## [4.0.12] - 2026-06-27
 
 - style(web): 内置 WebUI 与主控制台全面对齐——CSS 三层同步（console-shared + shell-protocol）、Poppins、data-summary-card / data-conn-capsule、StatCard KPI、SVG 侧栏图标
