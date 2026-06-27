@@ -5,8 +5,11 @@
 
 ## [Unreleased]
 
+## [4.0.10] - 2026-06-27
+- fix(config): 改为写入 `config/plugins.json` 禁用 NapCat 内置插件 `napcat-plugin-builtin`，真正阻止 `#napcat` 本地命令响应（4.0.9 写入的 `enableLocalCommand` 字段 NapCat 不识别，无效）
+
 ## [4.0.9] - 2026-06-27
-- fix(config): 同步 NapCat onebot11.json 时默认写入 `enableLocalCommand: false`，避免触发 `#napcat` 等本地命令
+- fix(config): 同步 NapCat onebot11.json 时默认写入 `enableLocalCommand: false`，避免触发 `#napcat` 等本地命令（注：该字段 NapCat 不识别，已由 4.0.10 修正）
 
 ## [4.0.8] - 2026-06-25
 - feat(metadata): 补充重新上号命令冷却声明

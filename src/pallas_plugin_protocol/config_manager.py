@@ -134,7 +134,6 @@ class AccountConfigManager:
         data.setdefault("musicSignUrl", "https://ss.xingzhige.com/music_card/card")
         data.setdefault("enableLocalFile2Url", False)
         data.setdefault("parseMultMsg", False)
-        data["enableLocalCommand"] = False
         data.setdefault("imageDownloadProxy", "")
         data.setdefault(
             "timeout",
@@ -193,7 +192,19 @@ class AccountConfigManager:
                 json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
             )
         account["napcat_config_path"] = str(targets[0])
+        self.sync_plugins(config_dir)
         self.sync_webui(account, resolve_qq)
+
+    def sync_plugins(self, config_dir: Path) -> None:
+        # 关闭 NapCat 内置插件，避免其响应 #napcat 等本地命令
+        plugins_path = config_dir / "plugins.json"
+        data = self.safe_read_json(plugins_path)
+        if data.get("napcat-plugin-builtin") is False:
+            return
+        data["napcat-plugin-builtin"] = False
+        plugins_path.write_text(
+            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
 
     def sync_webui(self, account: dict, resolve_qq) -> None:
         qq = resolve_qq(account)
