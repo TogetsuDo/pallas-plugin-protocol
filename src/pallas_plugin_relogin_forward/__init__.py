@@ -38,7 +38,7 @@ __plugin_meta__ = PluginMetadata(
     extra={
         "version": PLUGIN_EXTRA_VERSION,
         "menu_template": PLUGIN_MENU_TEMPLATE,
-        "help_audience": "maintainer",
+        "help_audience": "superuser",
         "menu_data": [
             {
                 "func": "relogin 分片转发",
