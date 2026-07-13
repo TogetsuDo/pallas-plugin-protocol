@@ -37,6 +37,7 @@ prepare_account_for_snowluma_migration = (
     migration.prepare_account_for_snowluma_migration
 )
 assess_snowluma_account_health = health.assess_snowluma_account_health
+snowluma_config = load_module(f"{_PKG}.snowluma_config", "snowluma_config.py")
 
 
 class FakeLaunch:
@@ -92,3 +93,54 @@ def test_prepare_account_preserve_data_keeps_dir(tmp_path: Path) -> None:
     )
     assert account["account_data_dir"] == str(tmp_path / "legacy")
     assert account[ACCOUNT_PROTOCOL_BACKEND_KEY] == SNOWLUMA_PROTOCOL_BACKEND
+
+
+def test_snowluma_webui_password_from_webui_log_line() -> None:
+    lines = [
+        "22:39:16 INFO [WebUI] initial credentials: user=admin password=Ce39287f8d0a2581",
+    ]
+    assert (
+        snowluma_config.extract_snowluma_webui_temp_password_from_log_lines(lines)
+        == "ce39287f8d0a2581"
+    )
+
+
+def test_snowluma_webui_password_from_docker_log_files(tmp_path: Path) -> None:
+    account = {
+        "qq": "3879348674",
+        "account_data_dir": str(tmp_path),
+        "snowluma_linux_docker": True,
+    }
+    log_dir = tmp_path / "docker" / "snowluma" / "snowluma-data" / "logs"
+    log_dir.mkdir(parents=True)
+    (log_dir / "snowluma-2026-07-13.log").write_text(
+        "21:00:00 INFO [WebUI] initial credentials: user=admin password=abc12345deadbeef\n",
+        encoding="utf-8",
+    )
+    merged = snowluma_config.collect_snowluma_webui_log_lines(account, [])
+    assert (
+        snowluma_config.resolve_snowluma_webui_temp_password(account, merged)
+        == "abc12345deadbeef"
+    )
+
+
+def test_snowluma_webui_password_prefers_newest_log_file(tmp_path: Path) -> None:
+    account = {
+        "qq": "923722427",
+        "account_data_dir": str(tmp_path),
+        "snowluma_linux_docker": True,
+    }
+    log_dir = tmp_path / "docker" / "snowluma" / "snowluma-data" / "logs"
+    log_dir.mkdir(parents=True)
+    (log_dir / "snowluma-2026-07-14.log").write_text(
+        "00:16:09 INFO [WebUI] initial credentials: user=admin password=a3f9754ffd9d9b1a\n",
+        encoding="utf-8",
+    )
+    (log_dir / "snowluma-2026-07-13.log").write_text(
+        "21:00:00 INFO [WebUI] initial credentials: user=admin password=33b634ed0f95647a\n",
+        encoding="utf-8",
+    )
+    assert (
+        snowluma_config.resolve_snowluma_webui_temp_password(account, [])
+        == "a3f9754ffd9d9b1a"
+    )

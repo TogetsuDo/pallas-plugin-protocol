@@ -32,12 +32,6 @@ def register_pallas_protocol_routes(
 ) -> None:
     from ..config import resolve_protocol_webui_base_path
     from .pages import (
-        render_account_workspace,
-        render_dashboard,
-        render_import_page,
-        render_new_account_page,
-        render_protocol_assets_page,
-        render_settings_page,
         shell_font_stylesheet_link,
     )
 
@@ -56,6 +50,22 @@ def register_pallas_protocol_routes(
         if not raw.startswith("/"):
             raw = "/" + raw
         return raw.rstrip("/") or "/pallas"
+
+    def _redirect_to_console_protocol(
+        subpath: str = "",
+        *,
+        query: str = "",
+    ) -> RedirectResponse:
+        """协议独立 HTML 页已并入 Bot WebUI，旧书签重定向到 ``/pallas/protocol``。"""
+        console_base = _pallas_console_http_base()
+        dest = f"{console_base}/protocol"
+        sub = (subpath or "").strip()
+        if sub:
+            dest += sub if sub.startswith("/") else f"/{sub}"
+        q = (query or "").strip().lstrip("?")
+        if q:
+            dest = f"{dest}?{q}"
+        return RedirectResponse(url=dest, status_code=307)
 
     from pallas.console.webui.console_login import (
         install_pallas_http_request_context_middleware,
@@ -276,12 +286,7 @@ def register_pallas_protocol_routes(
         )
         if redirect is not None:
             return redirect
-        return HTMLResponse(
-            render_dashboard(
-                resolve_protocol_webui_base_path(plugin_config),
-                _pallas_console_http_base(),
-            ),
-        )
+        return _redirect_to_console_protocol()
 
     @app.get(f"{base}/settings", response_class=HTMLResponse)
     async def napcat_settings_page(
@@ -301,11 +306,9 @@ def register_pallas_protocol_routes(
         )
         if redirect is not None:
             return redirect
-        return HTMLResponse(
-            render_settings_page(
-                resolve_protocol_webui_base_path(plugin_config),
-                _pallas_console_http_base(),
-            ),
+        return RedirectResponse(
+            url=f"{_pallas_console_http_base()}/preferences",
+            status_code=307,
         )
 
     @app.get(f"{base}/new", response_class=HTMLResponse)
@@ -326,12 +329,7 @@ def register_pallas_protocol_routes(
         )
         if redirect is not None:
             return redirect
-        return HTMLResponse(
-            render_new_account_page(
-                resolve_protocol_webui_base_path(plugin_config),
-                _pallas_console_http_base(),
-            ),
-        )
+        return _redirect_to_console_protocol("/create")
 
     @app.get(f"{base}/import", response_class=HTMLResponse)
     async def napcat_import_page(
@@ -351,12 +349,7 @@ def register_pallas_protocol_routes(
         )
         if redirect is not None:
             return redirect
-        return HTMLResponse(
-            render_import_page(
-                resolve_protocol_webui_base_path(plugin_config),
-                _pallas_console_http_base(),
-            ),
-        )
+        return _redirect_to_console_protocol("/import")
 
     @app.post(f"{base}/api/accounts/import")
     async def import_accounts(
@@ -401,16 +394,8 @@ def register_pallas_protocol_routes(
         }
 
     def _redirect_legacy_runtime_path(request: Request) -> RedirectResponse:
-        parsed = urlparse(str(request.url))
-        path = parsed.path
-        if path.endswith("/runtime"):
-            new_path = path[: -len("/runtime")] + "/assets"
-        else:
-            new_path = path.replace("/runtime", "/assets", 1)
-        dest = urlunparse(
-            (parsed.scheme, parsed.netloc, new_path, "", parsed.query, parsed.fragment)
-        )
-        return RedirectResponse(url=dest, status_code=307)
+        _ = request
+        return _redirect_to_console_protocol("/assets")
 
     @app.get(f"{base}/assets", response_class=HTMLResponse)
     async def protocol_assets_page(
@@ -430,12 +415,7 @@ def register_pallas_protocol_routes(
         )
         if redirect is not None:
             return redirect
-        return HTMLResponse(
-            render_protocol_assets_page(
-                resolve_protocol_webui_base_path(plugin_config),
-                _pallas_console_http_base(),
-            ),
-        )
+        return _redirect_to_console_protocol("/assets")
 
     @app.get(f"{base}/runtime")
     async def legacy_runtime_page_redirect(request: Request):
@@ -464,9 +444,8 @@ def register_pallas_protocol_routes(
             return redirect
         if not manager.has_account(account_id):
             raise HTTPException(status_code=404, detail="账号不存在")
-        q = "tab=settings"
         aid = quote(str(account_id), safe="")
-        return RedirectResponse(url=f"{base}/account/{aid}?{q}", status_code=307)
+        return _redirect_to_console_protocol(f"/account/{aid}", query="tab=settings")
 
     @app.get(f"{base}/account/{{account_id}}", response_class=HTMLResponse)
     async def napcat_account_workspace(
@@ -489,23 +468,10 @@ def register_pallas_protocol_routes(
             return redirect
         if not manager.has_account(account_id):
             raise HTTPException(status_code=404, detail="账号不存在")
-        from pallas.console.webui.console_login import extract_session_from_request
-
-        page_session = (
-            extract_session_from_request(
-                cookies=dict(request.cookies),
-                header_token=x_pallas_protocol_token,
-                query_token=token,
-            )
-            or ""
-        )
-        return HTMLResponse(
-            render_account_workspace(
-                resolve_protocol_webui_base_path(plugin_config),
-                account_id,
-                _pallas_console_http_base(),
-                page_session=page_session,
-            ),
+        aid = quote(str(account_id), safe="")
+        return _redirect_to_console_protocol(
+            f"/account/{aid}",
+            query=str(request.url.query or ""),
         )
 
     @app.get(f"{base}/api/runtime")

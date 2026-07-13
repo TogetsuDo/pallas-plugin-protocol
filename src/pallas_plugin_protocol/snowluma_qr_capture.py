@@ -23,6 +23,9 @@ REMOTE_XWD_PATH = "/tmp/pallas-qr-capture.xwd"
 INITIAL_DELAY_SEC = 8.0
 POLL_INTERVAL_SEC = 2.0
 REFRESH_SETTLE_SEC = 3.5
+# QQ 登录窗内相对坐标：扫码页「刷新」偏下；已登录账号「登录」蓝按钮更靠下
+QQ_LOGIN_REFRESH_CLICK_Y_RATIO = 0.62
+QQ_LOGIN_QUICK_CLICK_Y_RATIO = 0.78
 
 QQ_LOGIN_WINDOW_RE = re.compile(
     r'\s+(0x[0-9a-f]+)\s+"QQ":\s+\([^)]+\)\s+(\d+)x(\d+)\+',
@@ -101,18 +104,27 @@ def list_xmessage_window_ids(tree_text: str) -> list[str]:
     return [match.group(1) for match in XMESSAGE_WINDOW_RE.finditer(tree_text)]
 
 
-def prepare_qq_login_for_capture(
+def dismiss_xmessage_windows(
+    container_name: str,
+    tree_text: str,
+    *,
+    display: str = DEFAULT_DISPLAY,
+    run_exec: Any | None = None,
+) -> None:
+    exec_runner = run_exec or _docker_exec
+    for window_id in list_xmessage_window_ids(tree_text):
+        exec_runner(container_name, ["xkill", "-id", window_id], display=display)
+
+
+def locate_qq_login_window(
     container_name: str,
     *,
     display: str = DEFAULT_DISPLAY,
     run_exec: Any | None = None,
     run_exec_text: Any | None = None,
-    run_exec_root: Any | None = None,
 ) -> tuple[str, int, int] | None:
-    """关闭 xmessage 遮挡并尝试刷新 QQ 登录二维码。"""
-    exec_runner = run_exec or _docker_exec
     text_runner = run_exec_text or _docker_exec_text
-    root_runner = run_exec_root or _docker_exec_root
+    exec_runner = run_exec or _docker_exec
     tree = text_runner(
         container_name,
         ["xwininfo", "-root", "-tree"],
@@ -120,44 +132,13 @@ def prepare_qq_login_for_capture(
     )
     if not tree:
         return None
-
-    for window_id in list_xmessage_window_ids(tree):
-        exec_runner(container_name, ["xkill", "-id", window_id], display=display)
-
-    login = find_qq_login_window(tree)
-    if login is None:
-        return None
-
-    window_id, width, height = login
-    if not _command_available_in_container(
-        container_name, "xdotool", display=display, run_exec_text=text_runner
-    ):
-        ensure_container_xdotool(
-            container_name,
-            display=display,
-            run_exec_text=text_runner,
-            run_exec_root=root_runner,
-        )
-    if _command_available_in_container(
-        container_name, "xdotool", display=display, run_exec_text=text_runner
-    ):
-        click_x = max(1, int(width * 0.5))
-        click_y = max(1, int(height * 0.62))
-        script = (
-            f"xdotool windowactivate --sync {window_id} && "
-            f"xdotool mousemove --window {window_id} {click_x} {click_y} click 1 && "
-            f"sleep 1.5 && "
-            f"xdotool mousemove --window {window_id} {click_x} {click_y} click 1"
-        )
-        exec_runner(container_name, ["sh", "-c", script], display=display)
-        time.sleep(REFRESH_SETTLE_SEC)
-    else:
-        logger.info(
-            "SnowLuma 容器 {} 未安装 xdotool，无法自动点击「刷新」；"
-            "若二维码已过期请重启账号或在镜像中预装 xdotool",
-            container_name,
-        )
-    return login
+    dismiss_xmessage_windows(
+        container_name,
+        tree,
+        display=display,
+        run_exec=exec_runner,
+    )
+    return find_qq_login_window(tree)
 
 
 def ensure_container_xdotool(
@@ -190,6 +171,153 @@ def ensure_container_xdotool(
     return _command_available_in_container(
         container_name, "xdotool", display=display, run_exec_text=run_exec_text
     )
+
+
+def click_qq_login_window(
+    container_name: str,
+    window_id: str,
+    width: int,
+    height: int,
+    *,
+    purpose: str,
+    display: str = DEFAULT_DISPLAY,
+    run_exec: Any | None = None,
+    run_exec_text: Any | None = None,
+    run_exec_root: Any | None = None,
+) -> bool:
+    """在 QQ 登录窗内点击：``refresh_qr`` 刷新二维码；``quick_login`` 一键登录。"""
+    exec_runner = run_exec or _docker_exec
+    text_runner = run_exec_text or _docker_exec_text
+    root_runner = run_exec_root or _docker_exec_root
+    if purpose == "quick_login":
+        click_y_ratio = QQ_LOGIN_QUICK_CLICK_Y_RATIO
+        settle_sec = 2.0
+        double_click = False
+    else:
+        click_y_ratio = QQ_LOGIN_REFRESH_CLICK_Y_RATIO
+        settle_sec = REFRESH_SETTLE_SEC
+        double_click = True
+
+    if not _command_available_in_container(
+        container_name, "xdotool", display=display, run_exec_text=text_runner
+    ):
+        ensure_container_xdotool(
+            container_name,
+            display=display,
+            run_exec_text=text_runner,
+            run_exec_root=root_runner,
+        )
+    if not _command_available_in_container(
+        container_name, "xdotool", display=display, run_exec_text=text_runner
+    ):
+        if purpose == "quick_login":
+            logger.info(
+                "SnowLuma 容器 {} 未安装 xdotool，无法自动点击「登录」",
+                container_name,
+            )
+        else:
+            logger.info(
+                "SnowLuma 容器 {} 未安装 xdotool，无法自动点击「刷新」；"
+                "若二维码已过期请重启账号或在镜像中预装 xdotool",
+                container_name,
+            )
+        return False
+
+    click_x = max(1, int(width * 0.5))
+    click_y = max(1, int(height * click_y_ratio))
+    if double_click:
+        script = (
+            f"xdotool windowactivate --sync {window_id} && "
+            f"xdotool mousemove --window {window_id} {click_x} {click_y} click 1 && "
+            f"sleep 1.5 && "
+            f"xdotool mousemove --window {window_id} {click_x} {click_y} click 1"
+        )
+    else:
+        script = (
+            f"xdotool windowactivate --sync {window_id} && "
+            f"xdotool mousemove --window {window_id} {click_x} {click_y} click 1"
+        )
+    exec_runner(container_name, ["sh", "-c", script], display=display)
+    time.sleep(settle_sec)
+    return True
+
+
+def prepare_qq_login_for_capture(
+    container_name: str,
+    *,
+    display: str = DEFAULT_DISPLAY,
+    run_exec: Any | None = None,
+    run_exec_text: Any | None = None,
+    run_exec_root: Any | None = None,
+) -> tuple[str, int, int] | None:
+    """关闭 xmessage 遮挡并点击「刷新」以更新扫码页二维码。"""
+    exec_runner = run_exec or _docker_exec
+    text_runner = run_exec_text or _docker_exec_text
+    root_runner = run_exec_root or _docker_exec_root
+    login = locate_qq_login_window(
+        container_name,
+        display=display,
+        run_exec=exec_runner,
+        run_exec_text=text_runner,
+    )
+    if login is None:
+        return None
+
+    window_id, width, height = login
+    click_qq_login_window(
+        container_name,
+        window_id,
+        width,
+        height,
+        purpose="refresh_qr",
+        display=display,
+        run_exec=exec_runner,
+        run_exec_text=text_runner,
+        run_exec_root=root_runner,
+    )
+    return login
+
+
+def attempt_snowluma_quick_login(
+    account: dict,
+    *,
+    config: Any | None = None,
+    run_exec: Any | None = None,
+    run_exec_text: Any | None = None,
+    run_exec_root: Any | None = None,
+) -> bool:
+    """已登录过账号的常见界面：点头像下的蓝色「登录」，而非截二维码。"""
+    if not account_uses_snowluma_docker(account):
+        return False
+    container = snowluma_docker_container_name(account)
+    display = snowluma_qr_capture_display(config)
+    exec_runner = run_exec or _docker_exec
+    login = locate_qq_login_window(
+        container,
+        display=display,
+        run_exec=exec_runner,
+        run_exec_text=run_exec_text,
+    )
+    if login is None:
+        return False
+    window_id, width, height = login
+    clicked = click_qq_login_window(
+        container,
+        window_id,
+        width,
+        height,
+        purpose="quick_login",
+        display=display,
+        run_exec=run_exec,
+        run_exec_text=run_exec_text,
+        run_exec_root=run_exec_root,
+    )
+    if clicked:
+        logger.info(
+            "SnowLuma 容器 {} 已点击 QQ「登录」（一键登录界面）",
+            container,
+        )
+    return clicked
 
 
 def capture_screen_png_from_container(
@@ -368,6 +496,7 @@ def capture_snowluma_qrcode_once(
     run_exec: Any | None = None,
     run_cp: Any | None = None,
     run_exec_text: Any | None = None,
+    run_exec_root: Any | None = None,
 ) -> Path | None:
     if not account_uses_snowluma_docker(account):
         return None
@@ -377,31 +506,98 @@ def capture_snowluma_qrcode_once(
 
     container = snowluma_docker_container_name(account)
     display = snowluma_qr_capture_display(config)
-    login = prepare_qq_login_for_capture(
+    exec_runner = run_exec or _docker_exec
+    text_runner = run_exec_text or _docker_exec_text
+    root_runner = run_exec_root or _docker_exec_root
+
+    login = locate_qq_login_window(
         container,
         display=display,
-        run_exec=run_exec,
-        run_exec_text=run_exec_text,
+        run_exec=exec_runner,
+        run_exec_text=text_runner,
     )
-    window_id = login[0] if login else None
-    screen = capture_screen_png_from_container(
-        container,
-        display=display,
-        window_id=window_id,
-        run_exec=run_exec,
-        run_cp=run_cp,
-    )
+    if login is None:
+        return None
+    window_id, width, height = login
+
+    def capture_once() -> bytes | None:
+        return capture_screen_png_from_container(
+            container,
+            display=display,
+            window_id=window_id,
+            run_exec=exec_runner,
+            run_cp=run_cp,
+        )
+
+    screen = capture_once()
     if not screen:
         return None
 
     qr_png = extract_qr_png_from_screen(screen)
-    if not qr_png:
-        logger.debug(
-            "SnowLuma 截屏未识别到有效 QQ 登录二维码（可能仍在加载或已过期）: container={}",
-            container,
-        )
-        return None
-    return write_qrcode_cache(account_data_dir, qr_png)
+    if qr_png:
+        return write_qrcode_cache(account_data_dir, qr_png)
+
+    # 无二维码：先尝试刷新扫码页；仍无则视为「一键登录」界面并点蓝色「登录」
+    click_qq_login_window(
+        container,
+        window_id,
+        width,
+        height,
+        purpose="refresh_qr",
+        display=display,
+        run_exec=exec_runner,
+        run_exec_text=text_runner,
+        run_exec_root=root_runner,
+    )
+    screen = capture_once()
+    if screen:
+        qr_png = extract_qr_png_from_screen(screen)
+        if qr_png:
+            return write_qrcode_cache(account_data_dir, qr_png)
+
+    logger.debug(
+        "SnowLuma 截屏未识别到有效 QQ 登录二维码（可能为一键登录界面或仍在加载）: container={}",
+        container,
+    )
+    return None
+
+
+def restore_snowluma_qq_login(
+    account: dict,
+    *,
+    config: Any | None = None,
+    run_exec: Any | None = None,
+    run_cp: Any | None = None,
+    run_exec_text: Any | None = None,
+    run_exec_root: Any | None = None,
+) -> dict[str, Any]:
+    """恢复 QQ 登录：有二维码则写入 cache；否则自动点击「登录」。"""
+    path = capture_snowluma_qrcode_once(
+        account,
+        config=config,
+        run_exec=run_exec,
+        run_cp=run_cp,
+        run_exec_text=run_exec_text,
+        run_exec_root=run_exec_root,
+    )
+    if path is not None:
+        return {"mode": "qrcode", "qrcode_path": str(path)}
+    clicked = attempt_snowluma_quick_login(
+        account,
+        config=config,
+        run_exec=run_exec,
+        run_exec_text=run_exec_text,
+        run_exec_root=run_exec_root,
+    )
+    if clicked:
+        return {
+            "mode": "quick_login",
+            "message": "已点击 QQ「登录」按钮，请稍候确认账号上线",
+        }
+    return {
+        "mode": "failed",
+        "message": "未识别到二维码，且无法自动点击「登录」；请确认 QQ 登录窗已打开",
+    }
 
 
 async def wait_and_capture_snowluma_qrcode(

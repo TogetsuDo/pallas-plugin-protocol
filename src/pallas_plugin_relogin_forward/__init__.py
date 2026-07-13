@@ -17,6 +17,7 @@ from pallas.api.metadata import (
 )
 from pallas.api.metadata import SCENE_PRIVATE, join_usage, usage_line
 from pallas.api.platform import is_sharded_worker
+from pallas.api.utils import reply_private_message
 from pallas.core.platform.shard.coord.relogin_payload import (
     ReloginHandleResult,
     ReplyItem,
@@ -79,22 +80,22 @@ async def apply_relogin_result(
     for item in result.replies:
         await send_reply_item(bot, event, item)
     if result.reject_hint:
-        await bot.send(event, result.reject_hint)
+        await reply_private_message(bot, event, result.reject_hint)
 
 
 async def send_reply_item(
     bot: Bot, event: PrivateMessageEvent, item: ReplyItem
 ) -> None:
     if item.kind == "text":
-        await bot.send(event, item.content)
+        await reply_private_message(bot, event, item.content)
         return
     if item.kind == "image_base64":
         try:
             data = base64.b64decode(item.content.encode("ascii"))
         except Exception:
-            await bot.send(event, "二维码数据解码失败。")
+            await reply_private_message(bot, event, "二维码数据解码失败。")
             return
-        await bot.send(event, MessageSegment.image(data))
+        await reply_private_message(bot, event, MessageSegment.image(data))
 
 
 relogin_forward_matcher = on_message(
@@ -115,7 +116,9 @@ async def relogin_forward_handler(bot: Bot, event: PrivateMessageEvent):
         text=text,
     )
     if result is None:
-        await bot.send(event, "转发 hub 执行重新上号失败，请稍后重试或联系管理员。")
+        await reply_private_message(
+            bot, event, "转发 hub 执行重新上号失败，请稍后重试或联系管理员。"
+        )
         _active_sessions.discard(key)
         return
 
@@ -125,7 +128,9 @@ async def relogin_forward_handler(bot: Bot, event: PrivateMessageEvent):
         and not result.reject_hint
         and not result.session_active
     ):
-        await bot.send(event, "会话已过期，请重新发送「牛牛重新上号」或「创建牛牛」。")
+        await reply_private_message(
+            bot, event, "会话已过期，请重新发送「牛牛重新上号」或「创建牛牛」。"
+        )
         _active_sessions.discard(key)
         return
 

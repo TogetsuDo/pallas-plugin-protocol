@@ -27,7 +27,8 @@ __plugin_meta__ = PluginMetadata(
     name="协议端管理",
     description="NapCat/SnowLuma 协议端账号管理与 Web 控制台。",
     usage=join_usage(
-        usage_line("/protocol/console", "协议端管理页"),
+        usage_line("/pallas/protocol", "协议连接（Bot 控制台）"),
+        usage_line("/protocol/console", "旧书签（自动跳转）"),
         usage_line("X-Pallas-Protocol-Token / ?token=", "API 鉴权"),
     ),
     type="application",
@@ -41,7 +42,7 @@ __plugin_meta__ = PluginMetadata(
                 "func": "协议端管理页",
                 "trigger_method": "http",
                 "help_audience": "superuser",
-                "trigger_condition": "/protocol/console",
+                "trigger_condition": "/pallas/protocol",
                 "brief_des": "管理协议账号与进程",
                 "detail_des": "可在页面执行创建账号、启动、停止、重启与日志查看。",
             },

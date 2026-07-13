@@ -22,6 +22,7 @@ from pallas.api.metadata import (
 )
 from pallas.api.metadata import SCENE_PRIVATE, join_usage, usage_line
 from pallas.api.config import user_is_bot_admin
+from pallas.api.utils import reply_private_message
 from pallas.core.foundation.db import make_bot_config_repository
 from pallas.api.platform import is_hub_role
 from pallas.product.llm.knowledge.declare import knowledge_source_row
@@ -109,7 +110,7 @@ __plugin_meta__ = PluginMetadata(
                     {
                         "title": "与协议端管理页的分工",
                         "content": (
-                            "Web 协议端管理页（/protocol/console）供维护者图形化管理；"
+                            "Bot 控制台「协议连接」（/pallas/protocol）供维护者图形化管理；"
                             "普通用户掉线优先用「牛牛重新上号」口令。"
                         ),
                         "keywords": "协议端,控制台,管理页,分工",
@@ -211,7 +212,9 @@ async def _relogin_got_nickname(
             protocol_manager.create_account(
                 {"qq": qq, "display_name": nickname, "enabled": True}
             )
-            await bot.send(event, f"已创建 {nickname} 并继续上号流程。")
+            await reply_private_message(
+                bot, event, f"已创建 {nickname} 并继续上号流程。"
+            )
         except Exception as e:
             await relogin_cmd.finish(f"自动创建协议端失败：{e}")
 
@@ -220,7 +223,7 @@ async def _relogin_got_nickname(
     if not account_data_dir:
         await relogin_cmd.finish("账号目录缺失，无法执行重新上号。")
 
-    await bot.send(event, "正在启动协议端...")
+    await reply_private_message(bot, event, "正在启动协议端...")
     started_at = datetime.now().astimezone()
     try:
         await protocol_manager.restart_account(qq)
@@ -235,8 +238,8 @@ async def _relogin_got_nickname(
 
     try:
         qr_bytes = qr_path.read_bytes()
-        await bot.send(event, "启动完成，请使用下面二维码登录：")
-        await bot.send(event, MessageSegment.image(qr_bytes))
+        await reply_private_message(bot, event, "启动完成，请使用下面二维码登录：")
+        await reply_private_message(bot, event, MessageSegment.image(qr_bytes))
     except OSError as e:
         await relogin_cmd.finish(f"二维码读取失败：{e}")
 
@@ -330,7 +333,7 @@ async def _create_got_owners(
     if not account_data_dir:
         await create_cmd.finish("账号已创建，但账号目录缺失，无法启动。")
 
-    await bot.send(event, "正在启动协议端...")
+    await reply_private_message(bot, event, "正在启动协议端...")
     started_at = datetime.now().astimezone()
     try:
         await protocol_manager.start_account(qq)
@@ -351,10 +354,10 @@ async def _create_got_owners(
     if qr_path is not None:
         try:
             qr_bytes = qr_path.read_bytes()
-            await bot.send(event, "请使用下面二维码完成登录：")
-            await bot.send(event, MessageSegment.image(qr_bytes))
+            await reply_private_message(bot, event, "请使用下面二维码完成登录：")
+            await reply_private_message(bot, event, MessageSegment.image(qr_bytes))
         except OSError as e:
-            await bot.send(event, f"二维码读取失败：{e}")
+            await reply_private_message(bot, event, f"二维码读取失败：{e}")
 
     owners_str = "、".join(owner_qqs)
     timeout_hint = (

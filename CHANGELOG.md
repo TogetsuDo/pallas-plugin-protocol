@@ -5,6 +5,33 @@
 
 ## [Unreleased]
 
+## [4.0.25] - 2026-07-14
+
+- fix(relogin): 群临时会话回复走 `send_private_msg` + `group_id`，SnowLuma 非好友可收文字/二维码
+- feat(snowluma): WebUI API 客户端（改密、inject consent、进程轮询）与配置 Docker 同步
+- fix(web): 协议独立 HTML 页重定向至 Bot WebUI `/pallas/protocol` 系列路由；偏好设置跳转 `/pallas/preferences`
+
+## [4.0.24] - 2026-07-14
+
+- chore(release): 版本号对齐（与 4.0.23 变更一并合入 4.0.25 发布）
+
+## [4.0.23] - 2026-07-14
+
+- fix(relogin): 容器重启后 QR 窗未就绪时继续轮询截屏/一键登录，不再立即报「恢复登录失败」
+- fix(snowluma): refresh 失败时走 `wait_and_capture_snowluma_qrcode` 而非直接抛错
+- fix(snowluma): bootstrap 口令按日志文件日期从新到旧解析，避免容器重建后误用旧口令
+
+## [4.0.22] - 2026-07-13
+
+- fix(snowluma): inject / 重新上号前自动完成 WebUI 首次改密（`mustChangePassword`），避免 `/api/processes` 403
+- fix(snowluma): 托管改密后写入 `snowluma_managed_webui_password`，后续优先复用
+
+## [4.0.21] - 2026-07-13
+
+- feat(relogin): SnowLuma 一键登录分支——重新上号时自动点「登录」并等待牛牛连上，成功回复「牛牛已重新上线」
+- feat(protocol): `wait_account_bot_connected` / `wait_account_process_running` / `is_bot_connected` 供上号流程轮询
+- feat(snowluma): 一键登录与 inject consent、Docker wsClients 同步（4.0.20 起累积，本版一并发布）
+
 ## [4.0.20] - 2026-07-13
 
 - fix(snowluma): libzbar 检测改为实测 decode（`zbar_version` API 已不可用导致误报）

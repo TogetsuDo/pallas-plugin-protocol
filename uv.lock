@@ -397,7 +397,7 @@ wheels = [
 
 [[package]]
 name = "pallas-plugin-protocol"
-version = "4.0.20"
+version = "4.0.25"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },

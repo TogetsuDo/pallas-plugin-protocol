@@ -51,9 +51,7 @@ qrcode_cache_looks_valid = qr_capture.qrcode_cache_looks_valid
 
 
 def test_is_valid_qq_login_qr_payload() -> None:
-    assert is_valid_qq_login_qr_payload(
-        b"https://txz.qq.com/p?k=abc&f=1600001615"
-    )
+    assert is_valid_qq_login_qr_payload(b"https://txz.qq.com/p?k=abc&f=1600001615")
     assert not is_valid_qq_login_qr_payload(b"https://example.com/")
     assert not is_valid_qq_login_qr_payload(b"not-a-url")
 
@@ -119,23 +117,21 @@ def test_capture_snowluma_qrcode_once_writes_cache(tmp_path: Path) -> None:
     Image.new("RGB", (640, 480), color=(20, 20, 20)).save(fake_screen, format="PNG")
     fake_qr = b"fake-qr-png"
 
-    def fake_exec(container: str, cmd_tail: list[str], *, display: str) -> int:
-        assert container == "pallas-proto-sl-acc1"
-        assert display == ":1"
-        assert cmd_tail[0] == "import"
-        return 0
+    def fake_window_tree(*_a, **_k) -> str:
+        return '     0x800003 "QQ": ("qq" "QQ")  320x460+0+0  +800+300'
 
-    def fake_cp(container: str, remote: str) -> bytes | None:
-        return fake_screen.getvalue()
-
-    with patch.object(qr_capture, "extract_qr_png_from_screen", return_value=fake_qr):
+    with (
+        patch.object(
+            qr_capture,
+            "capture_screen_png_from_container",
+            return_value=fake_screen.getvalue(),
+        ),
+        patch.object(qr_capture, "extract_qr_png_from_screen", return_value=fake_qr),
+        patch.object(qr_capture, "click_qq_login_window", return_value=True),
+    ):
         out = capture_snowluma_qrcode_once(
             account,
-            run_exec=fake_exec,
-            run_cp=fake_cp,
-            run_exec_text=lambda *a, **k: (
-                '0x800003 "QQ": ("qq" "QQ")  320x460+0+0  +800+300'
-            ),
+            run_exec_text=fake_window_tree,
         )
     assert out is not None
     assert out == ad / "cache" / "qrcode.png"
@@ -154,24 +150,72 @@ def test_capture_snowluma_qrcode_once_skips_invalid_screen(tmp_path: Path) -> No
     fake_screen = io.BytesIO()
     Image.new("RGB", (640, 480), color=(20, 20, 20)).save(fake_screen, format="PNG")
 
+    def fake_window_tree(*_a, **_k) -> str:
+        return '     0x800003 "QQ": ("qq" "QQ")  320x460+0+0  +800+300'
+
+    with (
+        patch.object(
+            qr_capture,
+            "capture_screen_png_from_container",
+            return_value=fake_screen.getvalue(),
+        ),
+        patch.object(qr_capture, "extract_qr_png_from_screen", return_value=None),
+        patch.object(qr_capture, "click_qq_login_window", return_value=True),
+    ):
+        out = capture_snowluma_qrcode_once(
+            account,
+            run_exec_text=fake_window_tree,
+        )
+    assert out is None
+    assert not (ad / "cache" / "qrcode.png").exists()
+
+
+def test_restore_snowluma_qq_login_quick_login(tmp_path: Path) -> None:
+    ad = tmp_path / "inst" / "snowluma"
+    ad.mkdir(parents=True)
+    account = {
+        "id": "acc1",
+        "protocol_backend": "snowluma",
+        "snowluma_linux_docker": True,
+        "account_data_dir": str(ad),
+    }
+    fake_screen = io.BytesIO()
+    Image.new("RGB", (640, 480), color=(20, 20, 20)).save(fake_screen, format="PNG")
+    click_calls: list[str] = []
+
     def fake_exec(container: str, cmd_tail: list[str], *, display: str) -> int:
+        if cmd_tail[:2] == ["sh", "-c"] and "click 1" in cmd_tail[2]:
+            click_calls.append(cmd_tail[2])
         return 0
 
     def fake_cp(container: str, remote: str) -> bytes | None:
         return fake_screen.getvalue()
 
-    def fake_text(container: str, cmd_tail: list[str], *, display: str) -> str:
-        return '0x800003 "QQ": ("qq" "QQ")  320x460+0+0  +800+300'
+    def fake_window_tree(container: str, cmd_tail: list[str], *, display: str) -> str:
+        if cmd_tail[0] == "sh":
+            return "/usr/bin/xdotool"
+        return '     0x800003 "QQ": ("qq" "QQ")  320x460+0+0  +800+300'
 
-    with patch.object(qr_capture, "extract_qr_png_from_screen", return_value=None):
-        out = capture_snowluma_qrcode_once(
+    with (
+        patch.object(
+            qr_capture,
+            "capture_screen_png_from_container",
+            return_value=fake_screen.getvalue(),
+        ),
+        patch.object(qr_capture, "extract_qr_png_from_screen", return_value=None),
+        patch.object(qr_capture, "ensure_container_xdotool", return_value=True),
+        patch.object(qr_capture, "_command_available_in_container", return_value=True),
+    ):
+        out = qr_capture.restore_snowluma_qq_login(
             account,
             run_exec=fake_exec,
-            run_cp=fake_cp,
-            run_exec_text=fake_text,
+            run_exec_text=fake_window_tree,
+            run_exec_root=lambda *a, **k: 0,
         )
-    assert out is None
-    assert not (ad / "cache" / "qrcode.png").exists()
+    assert out["mode"] == "quick_login"
+    assert click_calls
+    assert "mousemove" in click_calls[-1]
+    assert "click 1" in click_calls[-1]
 
 
 def test_write_qrcode_cache(tmp_path: Path) -> None:

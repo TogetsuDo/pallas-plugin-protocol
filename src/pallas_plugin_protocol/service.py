@@ -66,9 +66,15 @@ from .runtime.snowluma_installer import (
 from .snowluma_config import resolve_snowluma_webui_temp_password
 from .snowluma_qr_capture import (
     account_uses_snowluma_docker,
+    attempt_snowluma_quick_login,
     capture_snowluma_qrcode_once,
     qrcode_cache_looks_valid,
+    restore_snowluma_qq_login,
     wait_and_capture_snowluma_qrcode,
+)
+from .snowluma_webui_client import (
+    snowluma_ensure_webui_session,
+    snowluma_fetch_processes,
 )
 from .snowluma_health import assess_snowluma_account_health, is_snowluma_account
 from .snowluma_host_deps import log_snowluma_host_deps_once
@@ -1428,7 +1434,10 @@ class PallasProtocolService:
         pwd = resolve_snowluma_webui_temp_password(
             account, self.tail_logs(account_id, 900)
         )
-        if not pwd:
+        if (
+            not pwd
+            and not str(account.get("snowluma_managed_webui_password") or "").strip()
+        ):
             raise ValueError(
                 "无法获取 SnowLuma WebUI 登录口令：请先启动本实例并在进程日志中查找 "
                 "「initial credentials: user=admin password=…」（旧版为「临时密码」）。"
@@ -1436,31 +1445,18 @@ class PallasProtocolService:
         base = self.snowluma_webui_http_base(account).rstrip("/")
         timeout = httpx.Timeout(25.0, connect=8.0)
         async with httpx.AsyncClient(timeout=timeout) as client:
-            lr = await client.post(f"{base}/api/login", json={"password": pwd})
-            lr.raise_for_status()
-            login_body = lr.json()
-            if not isinstance(login_body, dict) or not login_body.get("success"):
-                msg = ""
-                if isinstance(login_body, dict):
-                    msg = str(
-                        login_body.get("message") or login_body.get("status") or ""
-                    )
-                raise ValueError(f"SnowLuma WebUI 登录失败: {msg or lr.text}")
-            token = str(login_body.get("token") or "").strip()
-            if not token:
-                raise ValueError("SnowLuma WebUI 未返回登录 token")
-            headers = {"Authorization": f"Bearer {token}"}
-            pr = await client.get(f"{base}/api/processes", headers=headers)
-            pr.raise_for_status()
-            plist_raw = pr.json()
-            procs: list = []
-            if isinstance(plist_raw, dict):
-                procs = plist_raw.get("list") or []
-            if not isinstance(procs, list):
-                procs = []
+            headers, account_dirty = await snowluma_ensure_webui_session(
+                client,
+                base,
+                account,
+                self.tail_logs(account_id, 900),
+            )
+            if account_dirty:
+                self._save_accounts()
+            procs = await snowluma_fetch_processes(client, base, headers)
             hit: dict | None = None
             for item in procs:
-                if isinstance(item, dict) and str(item.get("uin") or "").strip() == qq:
+                if str(item.get("uin") or "").strip() == qq:
                     hit = item
                     break
             if hit is None:
@@ -1753,6 +1749,33 @@ class PallasProtocolService:
         if self._napcat_core_running(account_id, account):
             return True
         return self._is_bot_connected(account)
+
+    def is_bot_connected(self, account_id: str) -> bool:
+        account = self._accounts.get(account_id)
+        if not account:
+            return False
+        return self._is_bot_connected(account)
+
+    async def wait_account_process_running(
+        self, account_id: str, *, timeout_sec: int = 90
+    ) -> bool:
+        deadline = asyncio.get_running_loop().time() + timeout_sec
+        while asyncio.get_running_loop().time() < deadline:
+            account = self._accounts.get(account_id)
+            if account and self._napcat_core_running(account_id, account):
+                return True
+            await asyncio.sleep(2.0)
+        return False
+
+    async def wait_account_bot_connected(
+        self, account_id: str, *, timeout_sec: int = 90
+    ) -> bool:
+        deadline = asyncio.get_running_loop().time() + timeout_sec
+        while asyncio.get_running_loop().time() < deadline:
+            if self.is_bot_connected(account_id):
+                return True
+            await asyncio.sleep(2.0)
+        return False
 
     def _napcat_core_running(
         self, account_id: str, account: dict | None = None
@@ -2459,17 +2482,54 @@ class PallasProtocolService:
         if account_uses_snowluma_docker(account):
             if not self._linux_docker_container_running_sync(account):
                 raise ValueError("SnowLuma 容器未运行，请先启动账号")
-            path = await wait_and_capture_snowluma_qrcode(
+            restored = await asyncio.to_thread(
+                restore_snowluma_qq_login,
                 account,
-                since,
                 config=self._config,
-                timeout_sec=timeout_sec,
-                initial_delay_sec=0.0,
             )
+            mode = str(restored.get("mode") or "")
+            path: Path | None = None
+            if mode == "qrcode":
+                path = Path(str(restored.get("qrcode_path") or ""))
+            elif mode == "quick_login":
+                meta = self.account_qrcode_meta(account_id)
+                meta["login_mode"] = "quick_login"
+                meta["message"] = str(restored.get("message") or "")
+                meta["available"] = False
+                try:
+                    inject = await self.snowluma_inject_hook_via_webui(account_id)
+                    meta["inject_hook"] = inject
+                except (KeyError, ValueError) as err:
+                    meta["inject_hook_error"] = str(err)
+                return meta
+            if path is None or not path.is_file():
+                path = await wait_and_capture_snowluma_qrcode(
+                    account,
+                    since,
+                    config=self._config,
+                    timeout_sec=timeout_sec,
+                    initial_delay_sec=0.0,
+                )
             if path is None:
+                clicked = await asyncio.to_thread(
+                    attempt_snowluma_quick_login,
+                    account,
+                    config=self._config,
+                )
+                if clicked:
+                    meta = self.account_qrcode_meta(account_id)
+                    meta["login_mode"] = "quick_login"
+                    meta["message"] = "已点击 QQ「登录」按钮，请稍候确认账号上线"
+                    meta["available"] = False
+                    try:
+                        inject = await self.snowluma_inject_hook_via_webui(account_id)
+                        meta["inject_hook"] = inject
+                    except (KeyError, ValueError) as err:
+                        meta["inject_hook_error"] = str(err)
+                    return meta
                 raise ValueError(
-                    "刷新后仍未识别到有效二维码；请确认 QQ 登录窗已打开、"
-                    "二维码未过期，且宿主机 QR 截屏依赖就绪"
+                    str(restored.get("message"))
+                    or "刷新后仍未识别到有效二维码，且无法自动点击「登录」"
                 )
         elif bk == DEFAULT_PROTOCOL_BACKEND or is_napcat_account(account):
             if not self._napcat_core_running(account_id, account):

@@ -97,6 +97,91 @@ def append_qrcode(result: ReloginHandleResult, qr_path: Path) -> None:
     result.replies.append(ReplyItem(kind="image_base64", content=data))
 
 
+_RELOGIN_QR_WAIT_SEC = 60
+_RELOGIN_CONNECT_WAIT_SEC = 90
+_RELOGIN_PROCESS_WAIT_SEC = 90
+
+
+async def wait_bot_connected_after_login(
+    protocol_manager: Any, qq: str, *, timeout_sec: int
+) -> bool:
+    if protocol_manager.is_bot_connected(qq):
+        return True
+    return await protocol_manager.wait_account_bot_connected(
+        qq, timeout_sec=timeout_sec
+    )
+
+
+async def finish_relogin_after_restart(
+    protocol_manager: Any,
+    qq: str,
+    account: dict,
+    result: ReloginHandleResult,
+    *,
+    started_at: datetime,
+) -> None:
+    from pallas_plugin_protocol.snowluma_qr_capture import account_uses_snowluma_docker
+
+    if account_uses_snowluma_docker(account):
+        if not await protocol_manager.wait_account_process_running(
+            qq, timeout_sec=_RELOGIN_PROCESS_WAIT_SEC
+        ):
+            append_text(
+                result,
+                "协议容器启动超时，请稍后在协议端控制台查看或联系管理员。",
+            )
+            return
+
+        try:
+            meta = await protocol_manager.refresh_account_qrcode(
+                qq, timeout_sec=_RELOGIN_QR_WAIT_SEC
+            )
+        except (KeyError, ValueError) as err:
+            append_text(
+                result,
+                f"首次恢复登录未完成（{err}），正在继续等待二维码或一键登录…",
+            )
+            meta = {}
+
+        if str(meta.get("login_mode") or "") == "quick_login":
+            append_text(result, "已为你点击 QQ 一键登录，正在等待牛牛上线...")
+            if await wait_bot_connected_after_login(
+                protocol_manager, qq, timeout_sec=_RELOGIN_CONNECT_WAIT_SEC
+            ):
+                append_text(result, "牛牛已重新上线。")
+                return
+            inject_err = str(meta.get("inject_hook_error") or "").strip()
+            hint = f"\n注入 Hook 失败：{inject_err}" if inject_err else ""
+            append_text(
+                result,
+                "一键登录已触发，但 "
+                f"{_RELOGIN_CONNECT_WAIT_SEC} 秒内牛牛未连上，请到协议端控制台查看或联系管理员。"
+                f"{hint}",
+            )
+            return
+
+        if meta.get("exists"):
+            qr_path = protocol_manager.account_qrcode_path(qq)
+            if qr_path is not None:
+                append_text(result, "启动完成，请使用下面二维码登录：")
+                append_qrcode(result, qr_path)
+                return
+
+    qr_path = await protocol_manager.wait_account_qrcode(
+        qq, started_at, timeout_sec=_RELOGIN_QR_WAIT_SEC
+    )
+    if qr_path is None:
+        append_text(
+            result,
+            f"已完成启动，但在 {_RELOGIN_QR_WAIT_SEC} 秒内未检测到新的二维码，"
+            "请寻找号主上报情况。",
+        )
+        return
+
+    append_text(result, "启动完成，请使用下面二维码登录：")
+    append_qrcode(result, qr_path)
+
+
 async def run_relogin_restart(qq: str, result: ReloginHandleResult) -> None:
     from pallas_plugin_protocol import manager as protocol_manager
 
@@ -114,15 +199,9 @@ async def run_relogin_restart(qq: str, result: ReloginHandleResult) -> None:
         append_text(result, f"启动失败：{err}")
         return
 
-    qr_path = await protocol_manager.wait_account_qrcode(qq, started_at)
-    if qr_path is None:
-        append_text(
-            result, "已完成启动，但在 60 秒内未检测到新的二维码文件，请寻找号主上报情况"
-        )
-        return
-
-    append_text(result, "启动完成，请使用下面二维码登录：")
-    append_qrcode(result, qr_path)
+    await finish_relogin_after_restart(
+        protocol_manager, qq, account, result, started_at=started_at
+    )
 
 
 async def handle_relogin_message(
