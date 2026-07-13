@@ -62,6 +62,14 @@ async def bot_id_exists_in_db(bot_id: int) -> bool:
 async def wait_qrcode(
     account_data_dir: Path, since: datetime, timeout_sec: int = 60
 ) -> Path | None:
+    from pallas_plugin_protocol import manager as protocol_manager
+
+    for aid, acc in (getattr(protocol_manager, "_accounts", {}) or {}).items():
+        if str(acc.get("account_data_dir", "")).strip() == str(account_data_dir):
+            return await protocol_manager.wait_account_qrcode(
+                aid, since, timeout_sec=timeout_sec
+            )
+
     qr_path = account_data_dir / "cache" / "qrcode.png"
     deadline = asyncio.get_running_loop().time() + timeout_sec
     while asyncio.get_running_loop().time() < deadline:
@@ -106,7 +114,7 @@ async def run_relogin_restart(qq: str, result: ReloginHandleResult) -> None:
         append_text(result, f"启动失败：{err}")
         return
 
-    qr_path = await wait_qrcode(account_data_dir, started_at)
+    qr_path = await protocol_manager.wait_account_qrcode(qq, started_at)
     if qr_path is None:
         append_text(
             result, "已完成启动，但在 60 秒内未检测到新的二维码文件，请寻找号主上报情况"
@@ -362,7 +370,7 @@ async def handle_create_session(
         append_text(result, f"账号已创建并启动，但写入号主失败：{err}")
         return
 
-    qr_path = await wait_qrcode(account_data_dir, started_at)
+    qr_path = await protocol_manager.wait_account_qrcode(qq, started_at)
     if qr_path is not None:
         append_text(result, "请使用下面二维码完成登录：")
         append_qrcode(result, qr_path)

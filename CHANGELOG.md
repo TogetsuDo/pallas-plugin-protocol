@@ -5,6 +5,13 @@
 
 ## [Unreleased]
 
+## [4.0.18] - 2026-07-13
+
+- feat(snowluma): SnowLuma Docker 无头截屏识别 QQ 登录二维码，写入 `cache/qrcode.png`，供「牛牛重新上号」与协议页 `/qrcode` 复用
+- feat(snowluma): 截屏回退 `xwd` + 宿主机 ImageMagick `convert`（SnowLuma 镜像无 import/scrot）
+- fix(snowluma): 容器文件读取改用 `docker exec cat`（`docker cp -` 输出 tar 导致 XWD/PNG 损坏）
+- deps: 新增 `pillow`、`pyzbar`（宿主机需安装 `libzbar0`；XWD 回退需 `imagemagick`）
+
 ## [4.0.17] - 2026-06-30
 - refactor(metadata): `help_audience` 由 `maintainer` 改为 `superuser`（项目无独立维护者权限等级，统一到超管）
 

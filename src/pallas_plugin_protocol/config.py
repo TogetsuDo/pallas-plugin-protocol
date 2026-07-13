@@ -479,6 +479,22 @@ class Config(BaseModel):
             "需大于上一项",
         ),
     )
+    pallas_protocol_snowluma_qr_capture_display: str = Field(
+        default=":1",
+        description=field_help(
+            "SnowLuma Docker 截屏用的 X11 DISPLAY",
+            "容器内桌面默认 :1；一般无需修改",
+        ),
+    )
+    pallas_protocol_snowluma_qr_capture_initial_delay_s: float = Field(
+        default=8.0,
+        ge=0.0,
+        le=120.0,
+        description=field_help(
+            "重启后首次尝试截屏前的等待秒数",
+            "给 QQ 登录窗口弹出留时间；0 表示立即截屏",
+        ),
+    )
 
     def resolved_release_asset(self) -> str:
         asset = (self.pallas_protocol_release_asset or "").strip()

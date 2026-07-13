@@ -1,4 +1,3 @@
-import asyncio
 from datetime import datetime
 from pathlib import Path
 
@@ -150,23 +149,6 @@ def _extract_qq(arg: str) -> str:
     return text if text.isdigit() else ""
 
 
-async def _wait_qrcode(
-    account_data_dir: Path, since: datetime, timeout_sec: int = 60
-) -> Path | None:
-    qr_path = account_data_dir / "cache" / "qrcode.png"
-    deadline = asyncio.get_running_loop().time() + timeout_sec
-    while asyncio.get_running_loop().time() < deadline:
-        if qr_path.is_file():
-            try:
-                mtime = datetime.fromtimestamp(qr_path.stat().st_mtime, tz=since.tzinfo)
-                if mtime >= since:
-                    return qr_path
-            except OSError:
-                pass
-        await asyncio.sleep(1.2)
-    return None
-
-
 @relogin_cmd.handle()
 async def _relogin_handle(
     event: MessageEvent, state: T_State, args: Message = CommandArg()
@@ -245,7 +227,7 @@ async def _relogin_got_nickname(
     except Exception as e:
         await relogin_cmd.finish(f"启动失败：{e}")
 
-    qr_path = await _wait_qrcode(account_data_dir, started_at)
+    qr_path = await protocol_manager.wait_account_qrcode(qq, started_at)
     if qr_path is None:
         await relogin_cmd.finish(
             "已完成启动，但在 60 秒内未检测到新的二维码文件，请寻找号主上报情况"
@@ -365,7 +347,7 @@ async def _create_got_owners(
     except Exception as e:
         await create_cmd.finish(f"账号已创建并启动，但写入号主失败：{e}")
 
-    qr_path = await _wait_qrcode(account_data_dir, started_at)
+    qr_path = await protocol_manager.wait_account_qrcode(qq, started_at)
     if qr_path is not None:
         try:
             qr_bytes = qr_path.read_bytes()

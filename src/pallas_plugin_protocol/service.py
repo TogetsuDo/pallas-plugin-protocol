@@ -58,6 +58,11 @@ from .runtime.snowluma_installer import (
     default_snowluma_asset_name_for_tag,
 )
 from .snowluma_config import resolve_snowluma_webui_temp_password
+from .snowluma_qr_capture import (
+    account_uses_snowluma_docker,
+    capture_snowluma_qrcode_once,
+    wait_and_capture_snowluma_qrcode,
+)
 
 _LINUX_RT_MODES = frozenset({"docker", "appimage", "shell"})
 
@@ -2220,7 +2225,56 @@ class PallasProtocolService:
             / "cache"
             / "qrcode.png"
         )
-        return cache_qr if cache_qr.is_file() else None
+        if cache_qr.is_file():
+            return cache_qr
+        if account_uses_snowluma_docker(account):
+            captured = self.capture_snowluma_qrcode_sync(account_id)
+            if captured is not None and captured.is_file():
+                return captured
+        return None
+
+    def capture_snowluma_qrcode_sync(self, account_id: str) -> Path | None:
+        account = self._accounts.get(account_id)
+        if not account or not account_uses_snowluma_docker(account):
+            return None
+        return capture_snowluma_qrcode_once(account, config=self._config)
+
+    async def wait_account_qrcode(
+        self,
+        account_id: str,
+        since: datetime,
+        *,
+        timeout_sec: int = 60,
+    ) -> Path | None:
+        account = self._accounts.get(account_id)
+        if not account:
+            return None
+        account_data_dir = Path(str(account.get("account_data_dir", "")).strip())
+        if not account_data_dir:
+            return None
+
+        if account_uses_snowluma_docker(account):
+            return await wait_and_capture_snowluma_qrcode(
+                account,
+                since,
+                config=self._config,
+                timeout_sec=timeout_sec,
+            )
+
+        qr_path = account_data_dir / "cache" / "qrcode.png"
+        deadline = asyncio.get_running_loop().time() + timeout_sec
+        while asyncio.get_running_loop().time() < deadline:
+            if qr_path.is_file():
+                try:
+                    mtime = datetime.fromtimestamp(
+                        qr_path.stat().st_mtime, tz=since.tzinfo
+                    )
+                    if mtime >= since:
+                        return qr_path
+                except OSError:
+                    pass
+            await asyncio.sleep(1.2)
+        return None
 
     def account_qrcode_meta(self, account_id: str) -> dict:
         path = self.account_qrcode_path(account_id)
