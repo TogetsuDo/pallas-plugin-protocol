@@ -1,3 +1,0 @@
-/* 协议端样式入口：与 Pallas WebUI 共用 console-shared（npm run sync:protocol-css 同步） */
-@import "./console-shared.css";
-@import "./shell-protocol.css";

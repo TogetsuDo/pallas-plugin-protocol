@@ -31,9 +31,7 @@ def register_pallas_protocol_routes(
     plugin_config: Config,
 ) -> None:
     from ..config import resolve_protocol_webui_base_path
-    from .pages import (
-        shell_font_stylesheet_link,
-    )
+    from .login_assets import shell_font_stylesheet_link
 
     base = resolve_protocol_webui_base_path(plugin_config)
     page_cookie_name = "pallas_protocol_page_token"

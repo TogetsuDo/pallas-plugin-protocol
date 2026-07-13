@@ -5,6 +5,10 @@
 
 ## [Unreleased]
 
+## [4.0.26] - 2026-07-14
+
+- refactor(web): 移除已迁入 Bot WebUI 的独立 HTML 页（`pages_pkg/`）与壳层静态 CSS，仅保留登录页字体片段与 favicon
+
 ## [4.0.25] - 2026-07-14
 
 - fix(relogin): 群临时会话回复走 `send_private_msg` + `group_id`，SnowLuma 非好友可收文字/二维码
