@@ -1149,6 +1149,24 @@ def register_pallas_protocol_routes(
             raise HTTPException(status_code=404, detail="账号不存在")
         return await asyncio.to_thread(manager.account_qrcode_meta, account_id)
 
+    @app.post(f"{base}/api/accounts/{{account_id}}/qrcode/refresh")
+    async def refresh_account_qrcode(
+        account_id: str,
+        token: str | None = Query(default=None),
+        x_pallas_protocol_token: str | None = Header(
+            default=None, alias="X-Pallas-Protocol-Token"
+        ),
+    ):
+        _auth(x_pallas_protocol_token, token)
+        if not manager.has_account(account_id):
+            raise HTTPException(status_code=404, detail="账号不存在")
+        try:
+            return await manager.refresh_account_qrcode(account_id)
+        except KeyError as e:
+            raise HTTPException(status_code=404, detail=str(e)) from e
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+
     @app.get(f"{base}/api/accounts/{{account_id}}/qrcode")
     async def account_qrcode_image(
         account_id: str,

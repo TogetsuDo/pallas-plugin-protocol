@@ -545,6 +545,10 @@ def render_account_workspace(
       const card = document.getElementById("accQrCard");
       const hint = document.getElementById("accQrHint");
       try {{
+        if (force) {{
+          if (hint) hint.textContent = "正在刷新二维码…";
+          await api(`/api/accounts/${{encodeURIComponent(accountId)}}/qrcode/refresh`, {{ method: "POST" }});
+        }}
         const meta = await api(`/api/accounts/${{encodeURIComponent(accountId)}}/qrcode/meta`);
         const pngNow = !!(meta && meta.exists);
         if (!pngNow) {{
@@ -556,7 +560,7 @@ def render_account_workspace(
         if (force || ts !== accQrLastUpdated) {{
           accQrLastUpdated = ts;
           if (card) card.hidden = false;
-          await loadAccQrcodeImage(ts);
+          await loadAccQrcodeImage(force ? Date.now() : ts);
           if (hint && ts) {{
             try {{
               hint.textContent = "更新于 " + new Date(ts * 1000).toLocaleString() + " · 可直接扫码";

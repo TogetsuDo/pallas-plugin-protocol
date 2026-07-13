@@ -32,16 +32,14 @@ def imagemagick_convert_available() -> bool:
 
 
 def libzbar_shared_library_available() -> bool:
-    spec = importlib.util.find_spec("pyzbar.pyzbar")
-    if spec is None:
-        return False
     try:
-        from pyzbar.pyzbar import zbar_version
+        from PIL import Image
+        from pyzbar.pyzbar import decode as pyzbar_decode
     except ImportError:
         return False
     try:
-        zbar_version()
-    except (ImportError, OSError, FileNotFoundError):
+        pyzbar_decode(Image.new("RGB", (8, 8), "white"))
+    except (OSError, FileNotFoundError):
         return False
     return True
 

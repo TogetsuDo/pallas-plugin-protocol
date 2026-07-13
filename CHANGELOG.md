@@ -5,6 +5,16 @@
 
 ## [Unreleased]
 
+## [4.0.20] - 2026-07-13
+
+- fix(snowluma): libzbar 检测改为实测 decode（`zbar_version` API 已不可用导致误报）
+- fix(snowluma): 截取 QQ 登录窗而非整屏；关闭 xmessage；xdotool 点击刷新后再识别
+- fix(snowluma): 仅保存可解码的 txz.qq.com 二维码，废弃整屏「已过期」回退
+- fix(web): 协议页主题与主 WebUI `consolePrefs` 同步；首屏防闪
+- fix(web): `account_qrcode_meta` 返回 `host_deps` 状态
+- fix(web): 二维码「刷新」调用 `POST /qrcode/refresh`（NapCat RefreshQRcode / SnowLuma 重截屏）
+- deps: 显式声明 `httpx`、`pydantic`；`nonebot2[fastapi]` 替代裸 `nonebot2`
+
 ## [4.0.19] - 2026-07-13
 
 - feat(snowluma): Docker 容器支持 `memory` / `memory-swap` 限额（默认 1g / 1536m），降低多开 OOM 风险

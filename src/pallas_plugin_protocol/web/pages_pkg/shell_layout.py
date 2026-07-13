@@ -50,9 +50,53 @@ def shell_stylesheet_link(public_base_path: str) -> str:
     return f'  <link rel="stylesheet" href="{html_escape(href, quote=True)}" />\n'
 
 
+def shell_theme_boot_inline_script() -> str:
+    """首屏防闪：在 CSS 加载前读取与 WebUI 共用的 consolePrefs。"""
+    return """  <script>
+(function () {
+  try {
+    const raw = localStorage.getItem("pallas_console_prefs_v1");
+    const prefs = raw ? JSON.parse(raw) : {};
+    let mode = prefs.theme;
+    if (mode !== "dark" && mode !== "light" && mode !== "system") {
+      mode = localStorage.getItem("pallas-theme-mode") || "system";
+    }
+    const resolved =
+      mode === "dark"
+        ? "dark"
+        : mode === "light"
+          ? "light"
+          : window.matchMedia("(prefers-color-scheme: dark)").matches
+            ? "dark"
+            : "light";
+    const root = document.documentElement;
+    root.dataset.theme = resolved;
+    root.style.colorScheme = resolved;
+    root.dataset.layout = "hub";
+    root.dataset.surface = prefs.surfaceStyle === "solid" ? "solid" : "glass";
+    root.dataset.uiPreset = prefs.uiPreset === "shadcn" ? "shadcn" : "gs";
+    const accent = prefs.accentPreset || "sky";
+    if (accent) root.dataset.accent = accent;
+    const radius = prefs.radius;
+    if (radius === "tight" || radius === "round") root.dataset.radius = radius;
+    if (prefs.density === "compact") root.dataset.density = "compact";
+    const blur = Number(prefs.glassBlur);
+    if (Number.isFinite(blur)) root.style.setProperty("--surface-blur", blur + "px");
+    const opacity = Number(prefs.cardGlassOpacity);
+    if (Number.isFinite(opacity)) {
+      root.style.setProperty("--card-glass-opacity", String(opacity));
+      root.style.setProperty("--shell-glass-pct", Math.round(opacity * 100) + "%");
+    }
+  } catch (e) {}
+})();
+  </script>
+"""
+
+
 def shell_head_assets(public_base_path: str) -> str:
     return (
         shell_favicon_link(public_base_path)
+        + shell_theme_boot_inline_script()
         + shell_font_stylesheet_link(public_base_path)
         + shell_stylesheet_link(public_base_path)
     )
@@ -328,10 +372,12 @@ def _pallas_theme_bridge_js() -> str:
     }
     function applyPallasShellTheme(resolved, options) {
       const next = resolved === "dark" ? "dark" : "light";
-      document.documentElement.dataset.theme = next;
-      document.documentElement.style.colorScheme = next;
+      const root = document.documentElement;
+      root.dataset.theme = next;
+      root.style.colorScheme = next;
       document.body.setAttribute("data-theme", next);
       document.documentElement.classList.toggle("dark", next === "dark");
+      applyShellUiPrefsFromStorage();
       const persist = options && options.persist;
       if (!persist) return;
       try {
@@ -358,14 +404,27 @@ def _shell_prefs_js() -> str:
     function applyShellUiPrefsFromStorage() {
       const prefs = readConsolePrefsJson();
       const root = document.documentElement;
-      const accent = __SHELL_ACCENT_IDS.includes(prefs.accentPreset) ? prefs.accentPreset : "sky";
+      const accentIds = ["sky", "indigo", "emerald", "rose", "amber", "violet"];
+      const accent = accentIds.includes(prefs.accentPreset) ? prefs.accentPreset : "sky";
       root.dataset.accent = accent;
+      root.dataset.layout = "hub";
+      root.dataset.surface = prefs.surfaceStyle === "solid" ? "solid" : "glass";
+      root.dataset.uiPreset = prefs.uiPreset === "shadcn" ? "shadcn" : "gs";
       const radius = prefs.radius === "tight" || prefs.radius === "round" ? prefs.radius : "default";
       if (radius === "default") delete root.dataset.radius;
       else root.dataset.radius = radius;
       const density = prefs.density === "compact" ? "compact" : "comfortable";
       if (density === "comfortable") delete root.dataset.density;
       else root.dataset.density = density;
+      const blurRaw = Number(prefs.glassBlur);
+      const blur = Number.isFinite(blurRaw) ? Math.min(40, Math.max(8, blurRaw)) : 12;
+      const opacityRaw = Number(prefs.cardGlassOpacity);
+      const opacity = Number.isFinite(opacityRaw) ? Math.min(0.72, Math.max(0.12, opacityRaw)) : 0.25;
+      const saturate = 1.08 + ((blur - 8) / 32) * 0.18;
+      root.style.setProperty("--surface-blur", blur + "px");
+      root.style.setProperty("--card-glass-opacity", String(opacity));
+      root.style.setProperty("--shell-glass-pct", Math.round(opacity * 100) + "%");
+      root.style.setProperty("--glass-saturate", saturate.toFixed(2));
     }
     try {
       window.addEventListener("storage", (e) => {
@@ -430,6 +489,7 @@ def _shell_chrome_js() -> str:
     function setConsoleThemeMode(mode) {
       if (mode !== "dark" && mode !== "light" && mode !== "system") return;
       writeConsolePrefsJson({ theme: mode });
+      try { localStorage.setItem(PALLAS_THEME_MODE_KEY, mode); } catch (e) {}
       applyPallasShellTheme(resolvePallasThemePreference(), { persist: false });
       syncShellThemeToolbar();
     }

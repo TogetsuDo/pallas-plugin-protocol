@@ -1,13 +1,15 @@
 [project]
 name = "pallas-plugin-protocol"
-version = "4.0.19"
+version = "4.0.20"
 description = "Pallas-Bot 官方扩展：NapCat/SnowLuma 协议端管理、牛牛重新上号与分片转发。"
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.12,<4.0"
 dependencies = [
-    "nonebot2>=2.4.0",
+    "nonebot2[fastapi]>=2.4.0",
     "nonebot-adapter-onebot>=2.4.6",
+    "httpx>=0.28.1",
+    "pydantic>=2.0,<3",
     "pillow>=10.0",
     "pyzbar>=0.1.9",
 ]

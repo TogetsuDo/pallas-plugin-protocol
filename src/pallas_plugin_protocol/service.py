@@ -67,6 +67,7 @@ from .snowluma_config import resolve_snowluma_webui_temp_password
 from .snowluma_qr_capture import (
     account_uses_snowluma_docker,
     capture_snowluma_qrcode_once,
+    qrcode_cache_looks_valid,
     wait_and_capture_snowluma_qrcode,
 )
 from .snowluma_health import assess_snowluma_account_health, is_snowluma_account
@@ -2306,7 +2307,15 @@ class PallasProtocolService:
             / "qrcode.png"
         )
         if cache_qr.is_file():
-            return cache_qr
+            if account_uses_snowluma_docker(account) and not qrcode_cache_looks_valid(
+                cache_qr
+            ):
+                try:
+                    cache_qr.unlink()
+                except OSError:
+                    pass
+            elif cache_qr.is_file():
+                return cache_qr
         if account_uses_snowluma_docker(account):
             captured = self.capture_snowluma_qrcode_sync(account_id)
             if captured is not None and captured.is_file():
@@ -2368,18 +2377,116 @@ class PallasProtocolService:
         return None
 
     def account_qrcode_meta(self, account_id: str) -> dict:
+        from .snowluma_host_deps import host_deps_report
+
         path = self.account_qrcode_path(account_id)
+        deps = host_deps_report()
         if path is None:
-            return {"exists": False}
+            return {"exists": False, "host_deps": deps}
         try:
             st = path.stat()
         except OSError:
-            return {"exists": False}
+            return {"exists": False, "host_deps": deps}
         return {
             "exists": True,
             "updated_at": int(st.st_mtime),
             "size": int(st.st_size),
+            "host_deps": deps,
         }
+
+    def account_qrcode_cache_path_for(self, account: dict) -> Path:
+        return (
+            Path(str(account.get("account_data_dir", "")).strip())
+            / "cache"
+            / "qrcode.png"
+        )
+
+    def clear_account_qrcode_cache(self, account: dict) -> None:
+        path = self.account_qrcode_cache_path_for(account)
+        try:
+            if path.is_file():
+                path.unlink()
+        except OSError:
+            pass
+
+    async def refresh_napcat_qrcode_via_webui(self, account: dict) -> None:
+        wtok = str(account.get("webui_token", "")).strip()
+        if not wtok:
+            raise ValueError("账号未配置 NapCat WebUI token，无法刷新二维码")
+        base = self.snowluma_webui_http_base(account).rstrip("/")
+        params = {"webui_token": wtok}
+        timeout = httpx.Timeout(25.0, connect=8.0)
+        candidates = (
+            "/api/QQLogin/RefreshQRcode",
+            "/RefreshQRcode",
+        )
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            last_status: int | None = None
+            for path in candidates:
+                try:
+                    resp = await client.post(f"{base}{path}", params=params)
+                except httpx.HTTPError as err:
+                    raise ValueError(f"无法连接 NapCat WebUI：{err}") from err
+                if resp.status_code == 404:
+                    last_status = 404
+                    continue
+                if resp.status_code >= 400:
+                    detail = (resp.text or "").strip()[:240]
+                    raise ValueError(
+                        f"NapCat 刷新二维码失败 ({resp.status_code})"
+                        + (f"：{detail}" if detail else "")
+                    )
+                return
+            if last_status == 404:
+                raise ValueError("NapCat WebUI 不支持 RefreshQRcode 接口")
+            raise ValueError("无法连接 NapCat WebUI")
+
+    async def refresh_account_qrcode(
+        self, account_id: str, *, timeout_sec: int = 25
+    ) -> dict:
+        account = self._accounts.get(account_id)
+        if not account:
+            raise KeyError("账号不存在")
+
+        self.clear_account_qrcode_cache(account)
+        since = datetime.now(UTC)
+        bk = (
+            str(account.get(ACCOUNT_PROTOCOL_BACKEND_KEY) or DEFAULT_PROTOCOL_BACKEND)
+            .strip()
+            .lower()
+        ) or DEFAULT_PROTOCOL_BACKEND
+
+        if account_uses_snowluma_docker(account):
+            if not self._linux_docker_container_running_sync(account):
+                raise ValueError("SnowLuma 容器未运行，请先启动账号")
+            path = await wait_and_capture_snowluma_qrcode(
+                account,
+                since,
+                config=self._config,
+                timeout_sec=timeout_sec,
+                initial_delay_sec=0.0,
+            )
+            if path is None:
+                raise ValueError(
+                    "刷新后仍未识别到有效二维码；请确认 QQ 登录窗已打开、"
+                    "二维码未过期，且宿主机 QR 截屏依赖就绪"
+                )
+        elif bk == DEFAULT_PROTOCOL_BACKEND or is_napcat_account(account):
+            if not self._napcat_core_running(account_id, account):
+                raise ValueError("协议进程未运行，请先启动账号")
+            await self.refresh_napcat_qrcode_via_webui(account)
+            path = await self.wait_account_qrcode(
+                account_id, since, timeout_sec=timeout_sec
+            )
+            if path is None:
+                raise ValueError(
+                    "已请求 NapCat 刷新二维码，但超时未生成 cache/qrcode.png；"
+                    "请查看协议端日志"
+                )
+        else:
+            raise ValueError("当前协议后端不支持手动刷新二维码")
+
+        return self.account_qrcode_meta(account_id)
 
     def get_account_configs(self, account_id: str) -> dict:
         account = self._accounts.get(account_id)

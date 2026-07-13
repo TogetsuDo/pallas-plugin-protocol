@@ -93,7 +93,7 @@ uv pip install pallas-plugin-protocol
 | --- | --- |
 | 账号无法启动 | 查实例日志、程序目录 |
 | Bot 不回复 | 确认反向 WS 连上 hub/worker 端口 |
-| 无二维码 | 查协议端日志与 `data/` 下二维码文件 |
+| 无二维码 | SnowLuma：Hub 宿主机需 `libzbar0`、`imagemagick`；容器内建议安装 `xdotool`（自动点「刷新」）。查 `GET /protocol/console/api/snowluma/host-deps` |
 | Docker WS 连不上 | 见文档站 FAQ · 协议端反向 WebSocket |
 
 ## 实现

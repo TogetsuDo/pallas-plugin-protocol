@@ -44,7 +44,28 @@ qr_capture = load_module(
 account_uses_snowluma_docker = qr_capture.account_uses_snowluma_docker
 capture_snowluma_qrcode_once = qr_capture.capture_snowluma_qrcode_once
 extract_qr_png_from_screen = qr_capture.extract_qr_png_from_screen
+find_qq_login_window = qr_capture.find_qq_login_window
+is_valid_qq_login_qr_payload = qr_capture.is_valid_qq_login_qr_payload
 write_qrcode_cache = qr_capture.write_qrcode_cache
+qrcode_cache_looks_valid = qr_capture.qrcode_cache_looks_valid
+
+
+def test_is_valid_qq_login_qr_payload() -> None:
+    assert is_valid_qq_login_qr_payload(
+        b"https://txz.qq.com/p?k=abc&f=1600001615"
+    )
+    assert not is_valid_qq_login_qr_payload(b"https://example.com/")
+    assert not is_valid_qq_login_qr_payload(b"not-a-url")
+
+
+def test_find_qq_login_window() -> None:
+    tree = """
+     0xa00001 "qq": ("qq" "Qq")  10x10+10+10  +10+10
+        0x800003 "QQ": ("qq" "QQ")  320x460+0+0  +800+300
+        0x600032 "xmessage": ("xmessage" "Xmessage")  578x96+0+19  +671+500
+    """
+    found = find_qq_login_window(tree)
+    assert found == ("0x800003", 320, 460)
 
 
 def test_account_uses_snowluma_docker() -> None:
@@ -67,6 +88,7 @@ def test_extract_qr_png_from_screen_with_mock_decode() -> None:
 
     class FakeCode:
         rect = SimpleNamespace(left=100, top=80, width=120, height=120)
+        data = b"https://txz.qq.com/p?k=test&f=1"
 
     fake_pyzbar_inner = types.ModuleType("pyzbar.pyzbar")
     fake_pyzbar_inner.decode = lambda img: [FakeCode()]
@@ -111,10 +133,45 @@ def test_capture_snowluma_qrcode_once_writes_cache(tmp_path: Path) -> None:
             account,
             run_exec=fake_exec,
             run_cp=fake_cp,
+            run_exec_text=lambda *a, **k: (
+                '0x800003 "QQ": ("qq" "QQ")  320x460+0+0  +800+300'
+            ),
         )
     assert out is not None
     assert out == ad / "cache" / "qrcode.png"
     assert out.read_bytes() == fake_qr
+
+
+def test_capture_snowluma_qrcode_once_skips_invalid_screen(tmp_path: Path) -> None:
+    ad = tmp_path / "inst" / "snowluma"
+    ad.mkdir(parents=True)
+    account = {
+        "id": "acc1",
+        "protocol_backend": "snowluma",
+        "snowluma_linux_docker": True,
+        "account_data_dir": str(ad),
+    }
+    fake_screen = io.BytesIO()
+    Image.new("RGB", (640, 480), color=(20, 20, 20)).save(fake_screen, format="PNG")
+
+    def fake_exec(container: str, cmd_tail: list[str], *, display: str) -> int:
+        return 0
+
+    def fake_cp(container: str, remote: str) -> bytes | None:
+        return fake_screen.getvalue()
+
+    def fake_text(container: str, cmd_tail: list[str], *, display: str) -> str:
+        return '0x800003 "QQ": ("qq" "QQ")  320x460+0+0  +800+300'
+
+    with patch.object(qr_capture, "extract_qr_png_from_screen", return_value=None):
+        out = capture_snowluma_qrcode_once(
+            account,
+            run_exec=fake_exec,
+            run_cp=fake_cp,
+            run_exec_text=fake_text,
+        )
+    assert out is None
+    assert not (ad / "cache" / "qrcode.png").exists()
 
 
 def test_write_qrcode_cache(tmp_path: Path) -> None:
@@ -122,6 +179,31 @@ def test_write_qrcode_cache(tmp_path: Path) -> None:
     path = write_qrcode_cache(ad, b"\x89PNG")
     assert path.is_file()
     assert path.parent.name == "cache"
+
+
+def test_capture_screen_png_from_window_id() -> None:
+    fake_png = b"\x89PNG-window"
+
+    def fake_exec(container: str, cmd_tail: list[str], *, display: str) -> int:
+        assert container == "pallas-proto-sl-acc3"
+        if cmd_tail[:3] == ["xwd", "-id", "0x800003"]:
+            return 0
+        return 1
+
+    def fake_cp(container: str, remote: str) -> bytes | None:
+        return b"fake-xwd"
+
+    def fake_convert(xwd: bytes) -> bytes | None:
+        return fake_png
+
+    out = qr_capture.capture_screen_png_from_container(
+        "pallas-proto-sl-acc3",
+        window_id="0x800003",
+        run_exec=fake_exec,
+        run_cp=fake_cp,
+        xwd_to_png=fake_convert,
+    )
+    assert out == fake_png
 
 
 def test_capture_screen_png_from_xwd_fallback() -> None:
