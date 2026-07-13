@@ -428,6 +428,7 @@ def render_dashboard(base_path: str, pallas_console_http_base: str = "/pallas") 
     }}
     function accountStatusMeta(a) {{
       if (a.connected) return {{ text: "已连接", cls: "data-conn-capsule data-conn-capsule--on" }};
+      if (a.login_required) return {{ text: "待扫码", cls: "data-conn-capsule data-conn-capsule--run" }};
       if (a.process_running) return {{ text: "运行中", cls: "data-conn-capsule data-conn-capsule--run" }};
       if (a.launch_ready) return {{ text: "已停止", cls: "data-conn-capsule data-conn-capsule--off" }};
       return {{ text: "异常", cls: "data-conn-capsule data-conn-capsule--off" }};
@@ -549,13 +550,14 @@ def render_dashboard(base_path: str, pallas_console_http_base: str = "/pallas") 
       const total = rows.length;
       const running = rows.filter((x) => !!x.process_running).length;
       const connected = rows.filter((x) => !!x.connected).length;
+      const needsLogin = rows.filter((x) => !!x.login_required).length;
       const bad = rows.filter((x) => !x.launch_ready).length;
       const el = document.getElementById("kpis");
       const stat = (label, value) => (
         `<div class="stat-card stat-card--dense card"><div class="card__body">`
         + `<div class="stat-card__label">${{label}}</div><div class="stat-card__value">${{value}}</div></div></div>`
       );
-      el.innerHTML = stat("账号总数", total) + stat("运行中", running) + stat("已连接", connected) + stat("异常", bad);
+      el.innerHTML = stat("账号总数", total) + stat("运行中", running) + stat("已连接", connected) + (needsLogin ? stat("待扫码", needsLogin) : "") + stat("异常", bad);
     }}
     function renderAccounts() {{
       const mode = viewMode || "card";

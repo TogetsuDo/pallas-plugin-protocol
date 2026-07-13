@@ -400,6 +400,20 @@ class Config(BaseModel):
             "例如 1g；适当增大可减少浏览器组件崩溃",
         ),
     )
+    pallas_protocol_snowluma_docker_memory_limit: str = Field(
+        default="1g",
+        description=field_help(
+            "SnowLuma Docker 容器内存上限",
+            "多开时建议设置，例如 1g；留空表示不限制",
+        ),
+    )
+    pallas_protocol_snowluma_docker_memory_swap: str = Field(
+        default="1536m",
+        description=field_help(
+            "SnowLuma Docker 容器 memory+swap 总量",
+            "需不小于内存上限；留空表示不单独设置",
+        ),
+    )
     pallas_protocol_snowluma_docker_vnc_passwd: str = Field(
         default="",
         description=field_help(

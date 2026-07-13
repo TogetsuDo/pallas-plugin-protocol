@@ -5,6 +5,15 @@
 
 ## [Unreleased]
 
+## [4.0.19] - 2026-07-13
+
+- feat(snowluma): Docker 容器支持 `memory` / `memory-swap` 限额（默认 1g / 1536m），降低多开 OOM 风险
+- feat(snowluma): 账号健康态 `login_required` / `health_status` / `operational_warnings`（容器运行但未连牛牛 → 待扫码）
+- feat(snowluma): Hub 启动时审计 QR 截屏宿主机依赖（ImageMagick、libzbar、pillow、pyzbar）；`GET /api/snowluma/host-deps`
+- feat(migrate): `POST /api/accounts/migrate-to-snowluma` 与 CLI `tools/migrate_napcat_to_snowluma.py`（默认不保留 NapCat 数据，可选 rolling 启动）
+- feat(web): 协议仪表盘 KPI/状态胶囊展示「待扫码」
+- fix(migrate): `preserve_napcat_data=True` 时保留既有 `account_data_dir`
+
 ## [4.0.18] - 2026-07-13
 
 - feat(snowluma): SnowLuma Docker 无头截屏识别 QQ 登录二维码，写入 `cache/qrcode.png`，供「牛牛重新上号」与协议页 `/qrcode` 复用

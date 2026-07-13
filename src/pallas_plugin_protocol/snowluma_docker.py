@@ -15,6 +15,7 @@ snowluma_docker_remove_force = docker_cli.docker_rm_force_async
 snowluma_docker_remove_force_sync = docker_cli.docker_rm_force_sync
 
 __all__ = [
+    "append_snowluma_docker_resource_limits",
     "build_snowluma_docker_run_argv",
     "snowluma_docker_container_name",
     "snowluma_docker_container_running",
@@ -81,6 +82,19 @@ def snowluma_docker_effective_host_vnc_port(account: dict, config: Any) -> int:
         except (TypeError, ValueError):
             return 0
     return int(getattr(config, "pallas_protocol_snowluma_docker_host_vnc_port", 0) or 0)
+
+
+def append_snowluma_docker_resource_limits(argv: list[str], config: Any) -> None:
+    mem = str(
+        getattr(config, "pallas_protocol_snowluma_docker_memory_limit", "") or ""
+    ).strip()
+    if mem:
+        argv.extend(["--memory", mem])
+    swap = str(
+        getattr(config, "pallas_protocol_snowluma_docker_memory_swap", "") or ""
+    ).strip()
+    if swap:
+        argv.extend(["--memory-swap", swap])
 
 
 def build_snowluma_docker_run_argv(account: dict, config: Any, resolve_qq) -> list[str]:
@@ -176,6 +190,7 @@ def build_snowluma_docker_run_argv(account: dict, config: Any, resolve_qq) -> li
     if 1 <= vnc <= 65535:
         argv.extend(["-p", f"{vnc}:{in_vnc}"])
 
+    append_snowluma_docker_resource_limits(argv, config)
     argv.append(img)
     return argv
 

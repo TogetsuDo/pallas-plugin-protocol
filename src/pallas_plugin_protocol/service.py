@@ -24,6 +24,12 @@ from .account_batch_ops import (
     start_account_batch_job,
     wait_batch_job,
 )
+from .account_migration import (
+    is_napcat_account,
+    list_napcat_account_ids,
+    migrate_account_dict_to_snowluma,
+    napcat_docker_container_name_for_account,
+)
 from .backends import ProtocolRuntimeBackend, make_protocol_runtime_backend
 from .config import (
     Config,
@@ -63,6 +69,8 @@ from .snowluma_qr_capture import (
     capture_snowluma_qrcode_once,
     wait_and_capture_snowluma_qrcode,
 )
+from .snowluma_health import assess_snowluma_account_health, is_snowluma_account
+from .snowluma_host_deps import log_snowluma_host_deps_once
 
 _LINUX_RT_MODES = frozenset({"docker", "appimage", "shell"})
 
@@ -854,6 +862,7 @@ class PallasProtocolService:
 
     async def initialize(self) -> None:
         self._apply_runtime_profile_to_config()
+        log_snowluma_host_deps_once(self._config)
         self._load_accounts()
         self._pull_all_webui_from_disk()
         for account in self._accounts.values():
@@ -2210,6 +2219,77 @@ class PallasProtocolService:
             stagger_ms=stagger_ms,
         )
 
+    async def migrate_accounts_to_snowluma(
+        self,
+        account_ids: list[str] | None = None,
+        *,
+        preserve_napcat_data: bool = False,
+        stop_napcat_containers: bool = True,
+        start_after: bool = False,
+        stagger_ms: int | None = None,
+        max_concurrency: int | None = None,
+    ) -> dict[str, object]:
+        """批量将 NapCat 账号切换为 SnowLuma Docker（默认不保留 NapCat 数据目录）。"""
+        from .docker_cli import docker_rm_force_async
+        from .linux_docker import docker_stop_sync
+
+        if account_ids is None:
+            ids = list_napcat_account_ids(self._accounts)
+        else:
+            ids = [
+                aid
+                for aid in self.resolve_batch_account_ids(account_ids)
+                if is_napcat_account(self._accounts.get(aid) or {})
+            ]
+        if not ids:
+            raise ValueError("没有可迁移的 NapCat 账号")
+
+        stopped: list[str] = []
+        for aid in ids:
+            account = self._accounts.get(aid)
+            if not account:
+                continue
+            try:
+                await self.stop_account(aid)
+            except (KeyError, ValueError):
+                pass
+            if stop_napcat_containers and account.get("napcat_linux_docker"):
+                name = napcat_docker_container_name_for_account(account)
+                try:
+                    docker_stop_sync(name)
+                    await docker_rm_force_async(name)
+                    stopped.append(name)
+                except OSError:
+                    pass
+            migrate_account_dict_to_snowluma(
+                account,
+                launch=self._launch,
+                resolve_qq=self._resolve_qq,
+                instances_root=self._instances_root,
+                preserve_napcat_data=preserve_napcat_data,
+            )
+            self._protocol_runtime_backend(account).sync_onebot(
+                account, self._resolve_qq
+            )
+
+        self._save_accounts()
+        result: dict[str, object] = {
+            "migrated": ids,
+            "stopped_napcat_containers": stopped,
+            "preserve_napcat_data": preserve_napcat_data,
+        }
+        if start_after:
+            defaults = batch_defaults_from_config(self._config)
+            job_id = await self.start_account_batch(
+                "start",
+                ids,
+                mode=str(defaults.get("mode") or "rolling"),
+                max_concurrency=max_concurrency,
+                stagger_ms=stagger_ms,
+            )
+            result["start_job_id"] = job_id
+        return result
+
     def tail_logs(self, account_id: str, lines: int = 200) -> list[str]:
         if lines <= 0:
             return []
@@ -2237,6 +2317,17 @@ class PallasProtocolService:
         account = self._accounts.get(account_id)
         if not account or not account_uses_snowluma_docker(account):
             return None
+        from nonebot import logger
+
+        from .snowluma_host_deps import audit_snowluma_qr_capture_host_deps
+
+        dep_issues = audit_snowluma_qr_capture_host_deps()
+        if dep_issues:
+            logger.warning(
+                "SnowLuma QR 截屏宿主机依赖未就绪（账号 {}）：{}",
+                account_id,
+                "；".join(dep_issues),
+            )
         return capture_snowluma_qrcode_once(account, config=self._config)
 
     async def wait_account_qrcode(
@@ -2603,6 +2694,15 @@ class PallasProtocolService:
             if 1 <= int(h_vc) <= 65535:
                 items.append({"label": "VNC", "host": int(h_vc), "container": in_vc})
             snowluma_publish_ports = {"bind_host": bind, "items": items}
+        health: dict[str, object] = {}
+        if is_snowluma_account(account):
+            health = assess_snowluma_account_health(
+                account,
+                container_running=process_running,
+                bot_connected=connected,
+                launch_issues=launch_issues,
+                include_host_deps=bool(account.get("snowluma_linux_docker")),
+            )
         return {
             **account,
             "global_runtime_mode": grm,
@@ -2624,6 +2724,7 @@ class PallasProtocolService:
             "snowluma_webui_default_user": snowluma_webui_default_user,
             "runtime_version": runtime_version,
             "runtime_source": runtime_source,
+            **health,
         }
 
     def _resolve_account_runtime_version(self, account: dict) -> str:

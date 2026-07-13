@@ -1009,6 +1009,52 @@ def register_pallas_protocol_routes(
         job = manager.batch_coordinator().job_to_dict(job_id)
         return {"ok": True, "job_id": job_id, "job": job}
 
+    @app.post(f"{base}/api/accounts/migrate-to-snowluma")
+    async def migrate_accounts_to_snowluma(
+        payload: dict[str, Any],
+        token: str | None = Query(default=None),
+        x_pallas_protocol_token: str | None = Header(
+            default=None, alias="X-Pallas-Protocol-Token"
+        ),
+    ):
+        _auth(x_pallas_protocol_token, token)
+        body = payload if isinstance(payload, dict) else {}
+        raw_ids = body.get("account_ids")
+        ids: list[str] | None = None
+        if isinstance(raw_ids, list):
+            ids = [str(x) for x in raw_ids]
+        preserve = bool(body.get("preserve_napcat_data", False))
+        stop_nc = bool(body.get("stop_napcat_containers", True))
+        start_after = bool(body.get("start_after", False))
+        stagger_ms = body.get("stagger_ms")
+        max_concurrency = body.get("max_concurrency")
+        try:
+            result = await manager.migrate_accounts_to_snowluma(
+                ids,
+                preserve_napcat_data=preserve,
+                stop_napcat_containers=stop_nc,
+                start_after=start_after,
+                stagger_ms=int(stagger_ms) if stagger_ms is not None else None,
+                max_concurrency=int(max_concurrency)
+                if max_concurrency is not None
+                else None,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        return {"ok": True, **result}
+
+    @app.get(f"{base}/api/snowluma/host-deps")
+    async def snowluma_host_deps(
+        token: str | None = Query(default=None),
+        x_pallas_protocol_token: str | None = Header(
+            default=None, alias="X-Pallas-Protocol-Token"
+        ),
+    ):
+        _auth(x_pallas_protocol_token, token)
+        from ..snowluma_host_deps import host_deps_report
+
+        return host_deps_report()
+
     @app.get(f"{base}/api/accounts/batch/{{job_id}}")
     async def accounts_batch_status(
         job_id: str,
