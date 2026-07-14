@@ -5,6 +5,12 @@
 
 ## [Unreleased]
 
+## [4.0.28] - 2026-07-14
+
+- fix(snowluma): WebUI 自动改密前先完成 EULA consent；否则 `change-password` 403，托管口令写不进 `accounts.json` / WebUI 不展示
+- fix(snowluma): 一键登录点击 Y 比例 0.78→0.68，避免点到页脚链导致「已点击」但未真正登录
+- feat(snowluma): Docker 注入 `SNOWLUMA_ACCEPT_EULA=1` / `SNOWLUMA_ACCEPT_PRIVACY=1`（上游 1.12.2 无人值守同意；旧镜像忽略）
+
 ## [4.0.27] - 2026-07-14
 
 - fix(relogin): 临时会话发二维码失败时兜底提示加好友，避免 matcher 整次崩溃

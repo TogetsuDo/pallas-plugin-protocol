@@ -159,6 +159,12 @@ def build_snowluma_docker_run_argv(account: dict, config: Any, resolve_qq) -> li
         # WebUI 以挂载 runtime.json 为准；env 供镜像入口可选。
         "-e",
         f"SNOWLUMA_WEBUI_PORT={in_webui}",
+        # SnowLuma ≥1.12.2：无人值守同意 EULA/Privacy（须两项同时为 1/true；
+        # 仅存于进程环境，不写 consent.json）。旧镜像会忽略未知环境变量。
+        "-e",
+        "SNOWLUMA_ACCEPT_EULA=1",
+        "-e",
+        "SNOWLUMA_ACCEPT_PRIVACY=1",
         "-v",
         f"{data_dir}:/app/snowluma-data",
         "-v",

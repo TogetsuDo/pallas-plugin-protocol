@@ -210,6 +210,11 @@ async def snowluma_ensure_webui_session(
 
         headers = login.headers
         active_pwd = pwd
+        # SnowLuma 现要求先同意 EULA，再允许 change-password；顺序反了会 403，
+        # mustChangePassword 永远无法落盘，托管口令也就写不进 accounts.json。
+        await snowluma_accept_webui_consent_if_needed(
+            client, base, headers=headers, account=account
+        )
         if login.must_change_password:
             new_pwd = generate_snowluma_managed_webui_password()
             await snowluma_change_webui_password(
@@ -222,10 +227,9 @@ async def snowluma_ensure_webui_session(
             headers = login.headers
             if login.must_change_password:
                 raise ValueError("SnowLuma WebUI 改密后仍要求修改密码")
-
-        await snowluma_accept_webui_consent_if_needed(
-            client, base, headers=headers, account=account
-        )
+            await snowluma_accept_webui_consent_if_needed(
+                client, base, headers=headers, account=account
+            )
 
         probe = await client.get(f"{base}/api/processes", headers=headers)
         if probe.status_code == 403:

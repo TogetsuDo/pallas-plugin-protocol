@@ -25,7 +25,8 @@ POLL_INTERVAL_SEC = 2.0
 REFRESH_SETTLE_SEC = 3.5
 # QQ 登录窗内相对坐标：扫码页「刷新」偏下；已登录账号「登录」蓝按钮更靠下
 QQ_LOGIN_REFRESH_CLICK_Y_RATIO = 0.62
-QQ_LOGIN_QUICK_CLICK_Y_RATIO = 0.78
+# 一键登录窗约 320×460：0.78 易点到页脚「账密登录」；0.68 对准蓝色「登录」
+QQ_LOGIN_QUICK_CLICK_Y_RATIO = 0.68
 
 QQ_LOGIN_WINDOW_RE = re.compile(
     r'\s+(0x[0-9a-f]+)\s+"QQ":\s+\([^)]+\)\s+(\d+)x(\d+)\+',

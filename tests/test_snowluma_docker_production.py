@@ -84,3 +84,5 @@ def test_build_snowluma_docker_run_argv_includes_memory_limits() -> None:
     assert "--memory" in argv
     assert "--cap-add" in argv
     assert "SYS_PTRACE" in argv
+    assert "SNOWLUMA_ACCEPT_EULA=1" in argv
+    assert "SNOWLUMA_ACCEPT_PRIVACY=1" in argv

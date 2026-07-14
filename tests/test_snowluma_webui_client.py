@@ -24,6 +24,7 @@ def test_generate_snowluma_managed_webui_password_strength() -> None:
 @pytest.mark.asyncio
 async def test_snowluma_ensure_webui_session_rotates_password() -> None:
     calls: list[tuple[str, str]] = []
+    consented = {"ok": False}
 
     def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
@@ -46,10 +47,30 @@ async def test_snowluma_ensure_webui_session_rotates_password() -> None:
                     json={"success": True, "token": "tok-managed"},
                 )
             return httpx.Response(401, json={"success": False, "message": "bad"})
-        if path == "/api/auth/change-password":
-            return httpx.Response(200, json={"success": True, "requireRelogin": True})
         if path == "/api/agreements":
-            return httpx.Response(200, json={"consentRequired": False})
+            calls.append(("agreements", request.headers.get("Authorization", "")))
+            if consented["ok"]:
+                return httpx.Response(200, json={"consentRequired": False})
+            return httpx.Response(
+                200,
+                json={"consentRequired": True, "version": "eula-test"},
+            )
+        if path == "/api/agreements/record-consent":
+            calls.append(("consent", "ok"))
+            consented["ok"] = True
+            return httpx.Response(200, json={"success": True})
+        if path == "/api/auth/change-password":
+            calls.append(("change-password", "ok"))
+            if not consented["ok"]:
+                return httpx.Response(
+                    403,
+                    json={
+                        "status": "failed",
+                        "message": "请先阅读并同意用户协议与隐私政策",
+                        "consentRequired": True,
+                    },
+                )
+            return httpx.Response(200, json={"success": True, "requireRelogin": True})
         if path == "/api/processes":
             auth = request.headers.get("Authorization", "")
             if auth == "Bearer tok-managed":
@@ -80,3 +101,7 @@ async def test_snowluma_ensure_webui_session_rotates_password() -> None:
     assert headers["Authorization"] == "Bearer tok-managed"
     assert str(account.get("snowluma_managed_webui_password", "")).startswith("Pa!")
     assert ("login", "af7c7aaa85693d30") in calls
+    assert ("consent", "ok") in calls
+    assert ("change-password", "ok") in calls
+    # 必须先同意协议再改密
+    assert calls.index(("consent", "ok")) < calls.index(("change-password", "ok"))
