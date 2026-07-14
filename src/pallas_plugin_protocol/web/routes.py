@@ -8,16 +8,12 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import quote, urlparse, urlunparse
 
 import httpx
-from fastapi import FastAPI, Form, Header, HTTPException, Query, Request
+from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import (
     FileResponse,
-    HTMLResponse,
-    JSONResponse,
     RedirectResponse,
     StreamingResponse,
 )
-from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ConfigDict, Field
 
 if TYPE_CHECKING:
     from ..config import Config
@@ -31,10 +27,8 @@ def register_pallas_protocol_routes(
     plugin_config: Config,
 ) -> None:
     from ..config import resolve_protocol_webui_base_path
-    from .login_assets import shell_font_stylesheet_link
 
     base = resolve_protocol_webui_base_path(plugin_config)
-    page_cookie_name = "pallas_protocol_page_token"
 
     def _pallas_console_http_base() -> str:
         try:
@@ -106,7 +100,6 @@ def register_pallas_protocol_routes(
     def _auth(
         h: str | None,
         q: str | None,
-        c: str | None = None,
         *,
         request: Request | None = None,
     ) -> None:
@@ -116,17 +109,13 @@ def register_pallas_protocol_routes(
             is_console_auth_configured,
         )
 
-        _ = plugin_config
         req = request if request is not None else current_http_request()
         if req is None:
             raise HTTPException(status_code=500, detail="协议端鉴权缺少请求上下文")
-        cookies = dict(req.cookies)
-        legacy = req.cookies.get(page_cookie_name)
         if extract_session_from_request(
-            cookies=cookies,
+            cookies=dict(req.cookies),
             header_token=h,
             query_token=q,
-            cookie_token=(c or legacy),
         ):
             return
         if not is_console_auth_configured():
@@ -136,218 +125,40 @@ def register_pallas_protocol_routes(
             )
         raise HTTPException(status_code=401, detail="未登录或会话已失效，请重新登录")
 
-    def _ensure_page_auth(
+    def _redirect_legacy_protocol_page(
+        request: Request,
         *,
-        request: Request,
-        token: str | None,
-        x_pallas_protocol_token: str | None,
-        next_path: str,
-    ) -> RedirectResponse | None:
-        try:
-            cookie_token = request.cookies.get(page_cookie_name)
-            _auth(x_pallas_protocol_token, token, cookie_token, request=request)
-            return None
-        except HTTPException as e:
-            encoded_next = quote(next_path, safe="/?=&-_.~")
-            detail = str(getattr(e, "detail", "") or "鉴权失败")
-            if detail.startswith("未提供"):
-                return RedirectResponse(
-                    url=f"{base}/login?next={encoded_next}", status_code=307
-                )
-            reason = quote(detail, safe="")
-            return RedirectResponse(
-                url=f"{base}/login?next={encoded_next}&reason={reason}", status_code=307
-            )
-
-    def _resolve_login_target(next_path: str | None) -> str:
-        target = (next_path or f"{base}/").strip() or f"{base}/"
-        if not target.startswith(base):
-            target = f"{base}/"
-        return target
-
-    def _render_login_page(*, target: str, err: str, detail: str) -> HTMLResponse:
-        from pallas.console.webui.login_page import render_pallas_login_page_html
-
-        head = shell_font_stylesheet_link(base)
-        footer_note = (detail or "").strip()
-        html = render_pallas_login_page_html(
-            document_title="登录 · 协议端",
-            surface_label="协议端",
-            tagline="与 Web 控制台（/pallas）共用登录口令。",
-            form_action=f"{base}/login",
-            next_path=target,
-            error_message=(err or "").strip(),
-            head_extra_html=head,
-            footer_note=footer_note,
-            favicon_variant="protocol",
-            shell_brand_icon_base=base,
-        )
-        return HTMLResponse(html)
-
-    @app.get(f"{base}/login", response_class=HTMLResponse, response_model=None)
-    async def napcat_login_page(
-        next_path: str | None = Query(default=None, alias="next"),
-        reason: str | None = Query(default=None),
-    ):
-        target = _resolve_login_target(next_path)
-        err = ""
-        default_reason = (reason or "").strip()
-        if default_reason:
-            err = default_reason
-        detail = ""
-        return _render_login_page(target=target, err=err, detail=detail)
-
-    @app.post(f"{base}/login", response_class=HTMLResponse, response_model=None)
-    async def napcat_login_submit(
-        request: Request,
-        next_path: str | None = Form(default=None, alias="next"),
-        token: str = Form(...),
-    ) -> RedirectResponse | HTMLResponse:
-        target = _resolve_login_target(next_path)
-        detail = ""
-        from pallas.console.webui.console_login import (
-            SESSION_COOKIE_NAME,
-            SESSION_TTL_SEC,
-            mint_session_token,
-            verify_console_password,
+        target: str = "",
+        query: str = "",
+    ) -> RedirectResponse:
+        return _redirect_to_console_protocol(
+            target, query=query or str(request.url.query or "")
         )
 
-        if not verify_console_password(token):
-            return _render_login_page(
-                target=target,
-                err="口令不正确",
-                detail=detail,
-            )
-        sess = mint_session_token()
-        response = RedirectResponse(url=target, status_code=303)
-        response.set_cookie(
-            key=SESSION_COOKIE_NAME,
-            value=sess,
-            max_age=SESSION_TTL_SEC,
-            httponly=True,
-            samesite="lax",
-            secure=request.url.scheme == "https",
-            path="/",
-        )
-        response.delete_cookie(key=page_cookie_name, path=base or "/")
-        return response
+    @app.get(base)
+    @app.get(f"{base}/")
+    async def legacy_protocol_dashboard(request: Request) -> RedirectResponse:
+        return _redirect_legacy_protocol_page(request)
 
-    @app.post(f"{base}/logout", response_model=None)
-    async def napcat_logout(request: Request) -> RedirectResponse:  # noqa: ARG001
-        from pallas.console.webui.console_login import SESSION_COOKIE_NAME
+    @app.get(f"{base}/login")
+    @app.post(f"{base}/login")
+    @app.post(f"{base}/logout")
+    async def legacy_protocol_login(request: Request) -> RedirectResponse:
+        return _redirect_legacy_protocol_page(request)
 
-        response = RedirectResponse(url=f"{base}/login", status_code=303)
-        response.delete_cookie(key=SESSION_COOKIE_NAME, path="/")
-        response.delete_cookie(key=page_cookie_name, path=base or "/")
-        return response
-
-    class _ChangeConsoleLoginBody(BaseModel):
-        model_config = ConfigDict(extra="forbid")
-
-        new_password: str = Field(min_length=1, max_length=256)
-
-    @app.post(f"{base}/api/security/console-login")
-    async def protocol_change_console_login(
-        body: _ChangeConsoleLoginBody,
-        request: Request,
-        token: str | None = Query(default=None),
-        x_pallas_protocol_token: str | None = Header(
-            default=None, alias="X-Pallas-Protocol-Token"
-        ),
-    ) -> JSONResponse:
-        cookie_token = request.cookies.get(page_cookie_name)
-        _auth(x_pallas_protocol_token, token, cookie_token, request=request)
-        from pallas.console.webui.console_login import set_shared_console_login_token
-
-        try:
-            set_shared_console_login_token(body.new_password)
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e)) from e
-        return JSONResponse({"ok": True})
-
-    @app.get(base, response_class=HTMLResponse)
-    @app.get(f"{base}/", response_class=HTMLResponse)
-    async def napcat_dashboard(
-        request: Request,
-        token: str | None = Query(default=None),
-        x_pallas_protocol_token: str | None = Header(
-            default=None, alias="X-Pallas-Protocol-Token"
-        ),
-    ):
-        if not plugin_config.pallas_protocol_webui_enabled:
-            raise HTTPException(status_code=404, detail="Pallas-Bot 协议端管理页已关闭")
-        redirect = _ensure_page_auth(
-            request=request,
-            token=token,
-            x_pallas_protocol_token=x_pallas_protocol_token,
-            next_path=str(request.url.path),
-        )
-        if redirect is not None:
-            return redirect
-        return _redirect_to_console_protocol()
-
-    @app.get(f"{base}/settings", response_class=HTMLResponse)
-    async def napcat_settings_page(
-        request: Request,
-        token: str | None = Query(default=None),
-        x_pallas_protocol_token: str | None = Header(
-            default=None, alias="X-Pallas-Protocol-Token"
-        ),
-    ):
-        if not plugin_config.pallas_protocol_webui_enabled:
-            raise HTTPException(status_code=404, detail="Pallas-Bot 协议端管理页已关闭")
-        redirect = _ensure_page_auth(
-            request=request,
-            token=token,
-            x_pallas_protocol_token=x_pallas_protocol_token,
-            next_path=str(request.url.path),
-        )
-        if redirect is not None:
-            return redirect
+    @app.get(f"{base}/settings")
+    async def legacy_protocol_settings(request: Request) -> RedirectResponse:
         return RedirectResponse(
-            url=f"{_pallas_console_http_base()}/preferences",
-            status_code=307,
+            url=f"{_pallas_console_http_base()}/preferences", status_code=307
         )
 
-    @app.get(f"{base}/new", response_class=HTMLResponse)
-    async def napcat_new_account(
-        request: Request,
-        token: str | None = Query(default=None),
-        x_pallas_protocol_token: str | None = Header(
-            default=None, alias="X-Pallas-Protocol-Token"
-        ),
-    ):
-        if not plugin_config.pallas_protocol_webui_enabled:
-            raise HTTPException(status_code=404, detail="Pallas-Bot 协议端管理页已关闭")
-        redirect = _ensure_page_auth(
-            request=request,
-            token=token,
-            x_pallas_protocol_token=x_pallas_protocol_token,
-            next_path=str(request.url.path),
-        )
-        if redirect is not None:
-            return redirect
-        return _redirect_to_console_protocol("/create")
+    @app.get(f"{base}/new")
+    async def legacy_protocol_new_account(request: Request) -> RedirectResponse:
+        return _redirect_legacy_protocol_page(request, target="/create")
 
-    @app.get(f"{base}/import", response_class=HTMLResponse)
-    async def napcat_import_page(
-        request: Request,
-        token: str | None = Query(default=None),
-        x_pallas_protocol_token: str | None = Header(
-            default=None, alias="X-Pallas-Protocol-Token"
-        ),
-    ):
-        if not plugin_config.pallas_protocol_webui_enabled:
-            raise HTTPException(status_code=404, detail="Pallas-Bot 协议端管理页已关闭")
-        redirect = _ensure_page_auth(
-            request=request,
-            token=token,
-            x_pallas_protocol_token=x_pallas_protocol_token,
-            next_path=str(request.url.path),
-        )
-        if redirect is not None:
-            return redirect
-        return _redirect_to_console_protocol("/import")
+    @app.get(f"{base}/import")
+    async def legacy_protocol_import(request: Request) -> RedirectResponse:
+        return _redirect_legacy_protocol_page(request, target="/import")
 
     @app.post(f"{base}/api/accounts/import")
     async def import_accounts(
@@ -358,9 +169,6 @@ def register_pallas_protocol_routes(
         ),
     ):
         _auth(x_pallas_protocol_token, token)
-        import asyncio
-        from pathlib import Path
-
         from ..importer import run_import
 
         source_dir = Path(str(payload.get("source_dir", "")).strip())
@@ -391,85 +199,26 @@ def register_pallas_protocol_routes(
             "failed": result.failed,
         }
 
-    def _redirect_legacy_runtime_path(request: Request) -> RedirectResponse:
-        _ = request
-        return _redirect_to_console_protocol("/assets")
-
-    @app.get(f"{base}/assets", response_class=HTMLResponse)
-    async def protocol_assets_page(
-        request: Request,
-        token: str | None = Query(default=None),
-        x_pallas_protocol_token: str | None = Header(
-            default=None, alias="X-Pallas-Protocol-Token"
-        ),
-    ):
-        if not plugin_config.pallas_protocol_webui_enabled:
-            raise HTTPException(status_code=404, detail="Pallas-Bot 协议端管理页已关闭")
-        redirect = _ensure_page_auth(
-            request=request,
-            token=token,
-            x_pallas_protocol_token=x_pallas_protocol_token,
-            next_path=str(request.url.path),
-        )
-        if redirect is not None:
-            return redirect
-        return _redirect_to_console_protocol("/assets")
-
+    @app.get(f"{base}/assets")
     @app.get(f"{base}/runtime")
-    async def legacy_runtime_page_redirect(request: Request):
-        """旧书签 ``…/runtime`` → ``…/assets``。"""
-        return _redirect_legacy_runtime_path(request)
+    async def legacy_protocol_assets(request: Request) -> RedirectResponse:
+        return _redirect_legacy_protocol_page(request, target="/assets")
 
     @app.get(f"{base}/account/{{account_id}}/edit")
-    async def napcat_edit_redirect(
-        account_id: str,
-        request: Request,
-        token: str | None = Query(default=None),
-        x_pallas_protocol_token: str | None = Header(
-            default=None, alias="X-Pallas-Protocol-Token"
-        ),
-    ):
-        """旧书签 ``…/edit`` → 账号子路径设置页。"""
-        if not plugin_config.pallas_protocol_webui_enabled:
-            raise HTTPException(status_code=404, detail="Pallas-Bot 协议端管理页已关闭")
-        redirect = _ensure_page_auth(
-            request=request,
-            token=token,
-            x_pallas_protocol_token=x_pallas_protocol_token,
-            next_path=str(request.url.path),
+    async def legacy_protocol_account_edit(
+        account_id: str, request: Request
+    ) -> RedirectResponse:
+        aid = quote(account_id, safe="")
+        return _redirect_legacy_protocol_page(
+            request, target=f"/account/{aid}", query="tab=settings"
         )
-        if redirect is not None:
-            return redirect
-        if not manager.has_account(account_id):
-            raise HTTPException(status_code=404, detail="账号不存在")
-        aid = quote(str(account_id), safe="")
-        return _redirect_to_console_protocol(f"/account/{aid}", query="tab=settings")
 
-    @app.get(f"{base}/account/{{account_id}}", response_class=HTMLResponse)
-    async def napcat_account_workspace(
-        account_id: str,
-        request: Request,
-        token: str | None = Query(default=None),
-        x_pallas_protocol_token: str | None = Header(
-            default=None, alias="X-Pallas-Protocol-Token"
-        ),
-    ):
-        if not plugin_config.pallas_protocol_webui_enabled:
-            raise HTTPException(status_code=404, detail="Pallas-Bot 协议端管理页已关闭")
-        redirect = _ensure_page_auth(
-            request=request,
-            token=token,
-            x_pallas_protocol_token=x_pallas_protocol_token,
-            next_path=str(request.url.path),
-        )
-        if redirect is not None:
-            return redirect
-        if not manager.has_account(account_id):
-            raise HTTPException(status_code=404, detail="账号不存在")
-        aid = quote(str(account_id), safe="")
-        return _redirect_to_console_protocol(
-            f"/account/{aid}",
-            query=str(request.url.query or ""),
+    @app.get(f"{base}/account/{{account_id}}")
+    async def legacy_protocol_account(
+        account_id: str, request: Request
+    ) -> RedirectResponse:
+        return _redirect_legacy_protocol_page(
+            request, target=f"/account/{quote(account_id, safe='')}"
         )
 
     @app.get(f"{base}/api/runtime")
@@ -502,8 +251,7 @@ def register_pallas_protocol_routes(
             default=None, alias="X-Pallas-Protocol-Token"
         ),
     ):
-        cookie_token = request.cookies.get(page_cookie_name)
-        _auth(x_pallas_protocol_token, token, cookie_token, request=request)
+        _auth(x_pallas_protocol_token, token, request=request)
         from pallas.console.web import install_nonebot_log_sink
 
         install_nonebot_log_sink()
@@ -511,11 +259,11 @@ def register_pallas_protocol_routes(
         sc = scope if scope in ("all", "webui", "protocol") else "all"
 
         def _load() -> dict[str, object]:
+            from pallas.api.platform import is_sharded_hub
             from pallas.console.web import (
                 tail_nonebot_log_entries_scoped,
                 tail_nonebot_log_lines_scoped,
             )
-            from pallas.api.platform import is_sharded_hub
 
             cap = min(lines, 220) if is_sharded_hub() else lines
             return {
@@ -535,8 +283,7 @@ def register_pallas_protocol_routes(
             default=None, alias="X-Pallas-Protocol-Token"
         ),
     ):
-        cookie_token = request.cookies.get(page_cookie_name)
-        _auth(x_pallas_protocol_token, token, cookie_token, request=request)
+        _auth(x_pallas_protocol_token, token, request=request)
         from pallas.console.web import install_nonebot_log_sink, iter_nonebot_log_sse
 
         install_nonebot_log_sink()
@@ -1182,11 +929,3 @@ def register_pallas_protocol_routes(
             raise HTTPException(status_code=404, detail=str(e)) from e
         except RuntimeError as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
-
-    _pallas_ui_static = Path(__file__).resolve().parent / "static" / "pallas_ui"
-    if _pallas_ui_static.is_dir():
-        app.mount(
-            f"{b_norm}/_pallas_ui",
-            StaticFiles(directory=str(_pallas_ui_static)),
-            name="pallas_protocol_shell_ui",
-        )

@@ -57,8 +57,8 @@ uv pip install pallas-plugin-protocol
 
 | 入口 | 说明 |
 | --- | --- |
-| `/protocol/console/` | 协议端管理页（维护者向） |
-| `Web 控制台` | 侧边栏可跳转协议端 |
+| `/pallas/protocol` | 协议端管理页（维护者向） |
+| `/protocol/console/` | 旧书签，自动跳转到 Bot 控制台 |
 
 典型流程：登录控制台 → 创建实例 → 配置反向 WS → 启动。Docker 下注意 `PALLAS_PROTOCOL_DOCKER_ONEBOT_HOST`。
 
@@ -67,7 +67,7 @@ uv pip install pallas-plugin-protocol
 | 键 | 说明 |
 | --- | --- |
 | `pallas_protocol_enabled` | 是否加载协议端 |
-| `pallas_protocol_webui_enabled` | 是否挂载协议端 Web |
+| `pallas_protocol_webui_enabled` | 兼容旧配置；协议页面统一由 Bot 控制台提供 |
 | `pallas_protocol_instances_root` | 实例根目录 |
 | `pallas_protocol_program_dir` | NapCat 程序目录 |
 

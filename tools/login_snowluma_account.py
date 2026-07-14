@@ -21,7 +21,7 @@ async def main() -> int:
     parser.add_argument("--account-id", default="3879348674")
     parser.add_argument(
         "--protocol-base",
-        default="http://127.0.0.1:7969/pallas/protocol/console",
+        default="http://127.0.0.1:7969/protocol/console",
     )
     parser.add_argument("--token", default="")
     args = parser.parse_args()

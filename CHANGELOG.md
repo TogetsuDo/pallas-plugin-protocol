@@ -5,6 +5,10 @@
 
 ## [Unreleased]
 
+## [4.0.30] - 2026-07-14
+
+- fix(web): 旧 `/protocol/console` 页面及登录壳仅保留无鉴权 307 兼容跳转，正式入口统一为 `/pallas/protocol`
+
 ## [4.0.29] - 2026-07-14
 
 - feat(snowluma): 容器启动后自动轮询并点击 QQ 一键登录（`pallas_protocol_snowluma_auto_quick_login`，默认开）；已在跑但未连上的账号也会补点

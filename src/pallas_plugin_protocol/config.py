@@ -29,8 +29,8 @@ class Config(BaseModel):
     pallas_protocol_webui_enabled: bool = Field(
         default=True,
         description=field_help(
-            "是否提供协议端的网页管理界面",
-            "关闭后仍可用牛牛命令，但浏览器里打不开协议端页面",
+            "兼容旧协议网页书签",
+            "保留此旧配置以兼容既有部署；协议管理页面统一由 Bot 控制台 /pallas/protocol 提供",
         ),
     )
     pallas_protocol_web_implementation: str = Field(

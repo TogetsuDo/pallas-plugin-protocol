@@ -4,21 +4,22 @@ import logging
 from nonebot import get_app, get_driver, logger
 from nonebot.plugin import PluginMetadata
 
-from pallas.console.web import public_base_url
-from pallas.console.webui.console_login import prime_shared_console_login
 from pallas.api.metadata import (
     PLUGIN_EXTRA_VERSION,
     PLUGIN_HOMEPAGE,
     PLUGIN_MENU_TEMPLATE,
+    join_usage,
+    usage_line,
 )
-from pallas.api.metadata import join_usage, usage_line
 from pallas.api.paths import plugin_data_dir
+from pallas.console.webui.console_login import prime_shared_console_login
 
 from .config import (
     Config as Config,
+)
+from .config import (
     get_pallas_protocol_config,
     plugin_config,
-    resolve_protocol_webui_base_path,
 )
 from .service import PallasProtocolService
 from .web import register_pallas_protocol_routes
@@ -78,14 +79,9 @@ async def _startup() -> None:
         return
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
     await manager.initialize()
-    if plugin_config.pallas_protocol_webui_enabled:
-        dconf = get_driver().config
-        base_u = public_base_url(
-            host=getattr(dconf, "host", None),
-            port=getattr(dconf, "port", None),
-        )
-        path = resolve_protocol_webui_base_path(plugin_config)
-        logger.info(f"Pallas-Bot 协议端 | WebUI={base_u}{path}/")
+    logger.info(
+        "Pallas-Bot 协议端 | 管理入口=/pallas/protocol（旧 /protocol/console 仅兼容跳转）"
+    )
     profile = manager.runtime_profile()
     if bool(profile.get("follow_bot_lifecycle", True)):
         await manager.start_all_enabled_accounts()
