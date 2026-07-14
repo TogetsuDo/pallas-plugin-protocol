@@ -10,6 +10,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
 from PIL import Image
 
 _ROOT = Path(__file__).resolve().parents[1] / "src" / "pallas_plugin_protocol"
@@ -168,6 +169,97 @@ def test_capture_snowluma_qrcode_once_skips_invalid_screen(tmp_path: Path) -> No
         )
     assert out is None
     assert not (ad / "cache" / "qrcode.png").exists()
+
+
+def test_click_qq_auto_login_checkbox_coords() -> None:
+    calls: list[str] = []
+
+    def fake_exec(container: str, cmd_tail: list[str], *, display: str) -> int:
+        if cmd_tail[:2] == ["sh", "-c"]:
+            calls.append(cmd_tail[2])
+        return 0
+
+    def fake_text(container: str, cmd_tail: list[str], *, display: str) -> str:
+        if cmd_tail[0] == "sh":
+            return "/usr/bin/xdotool"
+        return ""
+
+    ok = qr_capture.click_qq_auto_login_checkbox(
+        "pallas-proto-sl-x",
+        "0x800003",
+        320,
+        460,
+        run_exec=fake_exec,
+        run_exec_text=fake_text,
+        run_exec_root=lambda *a, **k: 0,
+    )
+    assert ok
+    assert calls
+    # 320*0.415≈132, 460*0.81≈372
+    assert "132 372" in calls[-1]
+    assert "click 1" in calls[-1]
+
+
+def test_restore_snowluma_qq_login_prefer_quick_login(tmp_path: Path) -> None:
+    ad = tmp_path / "inst" / "snowluma"
+    ad.mkdir(parents=True)
+    account = {
+        "id": "acc-auto",
+        "protocol_backend": "snowluma",
+        "snowluma_linux_docker": True,
+        "account_data_dir": str(ad),
+    }
+    calls: list[str] = []
+
+    def fake_quick(*args: object, **kwargs: object) -> bool:
+        calls.append("quick")
+        return True
+
+    def fake_capture(*args: object, **kwargs: object) -> Path | None:
+        calls.append("capture")
+        return None
+
+    with (
+        patch.object(
+            qr_capture, "attempt_snowluma_quick_login", side_effect=fake_quick
+        ),
+        patch.object(
+            qr_capture, "capture_snowluma_qrcode_once", side_effect=fake_capture
+        ),
+    ):
+        out = qr_capture.restore_snowluma_qq_login(account, prefer_quick_login=True)
+    assert out["mode"] == "quick_login"
+    assert calls == ["quick"]
+
+
+@pytest.mark.asyncio
+async def test_wait_and_restore_snowluma_qq_login_polls() -> None:
+    account = {
+        "id": "acc-wait",
+        "protocol_backend": "snowluma",
+        "snowluma_linux_docker": True,
+        "account_data_dir": "/tmp/unused",
+    }
+    n = {"i": 0}
+
+    def fake_restore(*args: object, **kwargs: object) -> dict:
+        n["i"] += 1
+        if n["i"] < 2:
+            return {"mode": "failed", "message": "not yet"}
+        return {"mode": "quick_login", "message": "ok"}
+
+    with patch.object(
+        qr_capture, "restore_snowluma_qq_login", side_effect=fake_restore
+    ):
+        out = await qr_capture.wait_and_restore_snowluma_qq_login(
+            account,
+            timeout_sec=5,
+            initial_delay_sec=0,
+            poll_interval_sec=0.01,
+            prefer_quick_login=True,
+        )
+    assert out["mode"] == "quick_login"
+    assert n["i"] >= 2
 
 
 def test_restore_snowluma_qq_login_quick_login(tmp_path: Path) -> None:

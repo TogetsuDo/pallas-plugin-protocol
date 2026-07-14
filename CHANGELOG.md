@@ -5,6 +5,11 @@
 
 ## [Unreleased]
 
+## [4.0.29] - 2026-07-14
+
+- feat(snowluma): 容器启动后自动轮询并点击 QQ 一键登录（`pallas_protocol_snowluma_auto_quick_login`，默认开）；已在跑但未连上的账号也会补点
+- feat(snowluma): 恢复登录时顺手勾选扫码页「自动登录」，便于容器重启后 QQ 自行保持会话
+
 ## [4.0.28] - 2026-07-14
 
 - fix(snowluma): WebUI 自动改密前先完成 EULA consent；否则 `change-password` 403，托管口令写不进 `accounts.json` / WebUI 不展示

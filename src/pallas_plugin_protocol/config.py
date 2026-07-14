@@ -509,6 +509,22 @@ class Config(BaseModel):
             "给 QQ 登录窗口弹出留时间；0 表示立即截屏",
         ),
     )
+    pallas_protocol_snowluma_auto_quick_login: bool = Field(
+        default=True,
+        description=field_help(
+            "SnowLuma 容器启动后自动点 QQ「一键登录」",
+            "未连上时轮询登录窗并点击；关闭则仅手动刷新/重新上号时触发",
+        ),
+    )
+    pallas_protocol_snowluma_auto_quick_login_timeout_s: float = Field(
+        default=90.0,
+        ge=10.0,
+        le=600.0,
+        description=field_help(
+            "自动一键登录轮询超时（秒）",
+            "容器刚启动时 QQ 窗可能较慢；超时后停止本次尝试",
+        ),
+    )
 
     def resolved_release_asset(self) -> str:
         asset = (self.pallas_protocol_release_asset or "").strip()

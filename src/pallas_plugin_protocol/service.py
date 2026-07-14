@@ -71,6 +71,7 @@ from .snowluma_qr_capture import (
     qrcode_cache_looks_valid,
     restore_snowluma_qq_login,
     wait_and_capture_snowluma_qrcode,
+    wait_and_restore_snowluma_qq_login,
 )
 from .snowluma_webui_client import (
     snowluma_ensure_webui_session,
@@ -134,6 +135,7 @@ class PallasProtocolService:
             ),
         )
         self._batch = AccountBatchCoordinator()
+        self._snowluma_auto_login_tasks: dict[str, asyncio.Task[None]] = {}
 
     def _protocol_runtime_backend(
         self, account: dict | None = None, *, kind: str | None = None
@@ -903,6 +905,7 @@ class PallasProtocolService:
 
         ids = await self.collect_account_ids_for_autostart()
         if not ids:
+            self.schedule_snowluma_auto_quick_login_for_disconnected()
             return
         if len(ids) == 1:
             try:
@@ -913,6 +916,7 @@ class PallasProtocolService:
                 logger.exception(
                     f"Pallas-Bot 协议端: 自动启动账号 {ids[0]} 出现未预期异常"
                 )
+            self.schedule_snowluma_auto_quick_login_for_disconnected()
             return
         try:
             job_id = await start_account_batch_job(self, self._batch, "start", ids)
@@ -925,6 +929,106 @@ class PallasProtocolService:
             )
         except Exception:
             logger.exception("Pallas-Bot 协议端: 批量自动启动账号出现未预期异常")
+        self.schedule_snowluma_auto_quick_login_for_disconnected()
+
+    def schedule_snowluma_auto_quick_login_for_disconnected(self) -> None:
+        """已在跑但未连上的 SnowLuma Docker：后台轮询点一键登录。"""
+        if not bool(
+            getattr(self._config, "pallas_protocol_snowluma_auto_quick_login", True)
+        ):
+            return
+        for account_id, account in list(self._accounts.items()):
+            if not bool(account.get("enabled", True)):
+                continue
+            if not account_uses_snowluma_docker(account):
+                continue
+            if not self._linux_docker_container_running_sync(account):
+                continue
+            if self.is_bot_connected(account_id):
+                continue
+            self.schedule_snowluma_auto_quick_login(account_id)
+
+    def schedule_snowluma_auto_quick_login(self, account_id: str) -> None:
+        """容器启动后异步恢复 QQ 登录（不阻塞 start）。"""
+        if not bool(
+            getattr(self._config, "pallas_protocol_snowluma_auto_quick_login", True)
+        ):
+            return
+        account = self._accounts.get(account_id)
+        if not account or not account_uses_snowluma_docker(account):
+            return
+        if self.is_bot_connected(account_id):
+            return
+        existing = self._snowluma_auto_login_tasks.get(account_id)
+        if existing is not None and not existing.done():
+            return
+
+        async def _runner() -> None:
+            from nonebot import logger
+
+            try:
+                timeout = float(
+                    getattr(
+                        self._config,
+                        "pallas_protocol_snowluma_auto_quick_login_timeout_s",
+                        90.0,
+                    )
+                    or 90.0
+                )
+                restored = await wait_and_restore_snowluma_qq_login(
+                    account,
+                    config=self._config,
+                    timeout_sec=timeout,
+                    prefer_quick_login=True,
+                )
+                mode = str(restored.get("mode") or "")
+                if mode == "quick_login":
+                    logger.info(
+                        "Pallas-Bot 协议端: {} 已自动点击 QQ 一键登录",
+                        account_id,
+                    )
+                    connected = await self.wait_account_bot_connected(
+                        account_id, timeout_sec=min(120, int(timeout) + 30)
+                    )
+                    if not connected:
+                        logger.warning(
+                            "Pallas-Bot 协议端: {} 一键登录后等待 Bot 连上超时，跳过 inject",
+                            account_id,
+                        )
+                        return
+                    try:
+                        await self.snowluma_inject_hook_via_webui(account_id)
+                    except (KeyError, ValueError) as err:
+                        logger.warning(
+                            "Pallas-Bot 协议端: {} 自动 inject hook 跳过：{}",
+                            account_id,
+                            err,
+                        )
+                elif mode == "qrcode":
+                    logger.info(
+                        "Pallas-Bot 协议端: {} 截到登录二维码（需扫码），未自动点登录",
+                        account_id,
+                    )
+                else:
+                    logger.debug(
+                        "Pallas-Bot 协议端: {} 自动恢复登录未完成：{}",
+                        account_id,
+                        restored.get("message") or mode,
+                    )
+            except Exception:
+                logger.exception(
+                    "Pallas-Bot 协议端: {} 自动一键登录异常",
+                    account_id,
+                )
+            finally:
+                task = self._snowluma_auto_login_tasks.get(account_id)
+                if task is asyncio.current_task():
+                    self._snowluma_auto_login_tasks.pop(account_id, None)
+
+        self._snowluma_auto_login_tasks[account_id] = asyncio.create_task(
+            _runner(),
+            name=f"snowluma-auto-login:{account_id}",
+        )
 
     async def collect_account_ids_for_autostart(self) -> list[str]:
         ids: list[str] = []
@@ -1815,7 +1919,8 @@ class PallasProtocolService:
                 )
             if account.get("snowluma_linux_docker"):
                 if self._linux_docker_container_running_sync(account):
-                    await self._ensure_docker_logs_if_needed(account_id)
+                    await self.ensure_docker_logs_if_needed(account_id)
+                    self.schedule_snowluma_auto_quick_login(account_id)
                     return self._compose_account_state(account_id, account)
                 return await self._start_account_snowluma_linux_docker(
                     account_id, account, runtime
@@ -2141,12 +2246,17 @@ class PallasProtocolService:
         )
         runtime.process = logp
         runtime.drain_task = asyncio.create_task(self._drain_logs(account_id))
+        self.schedule_snowluma_auto_quick_login(account_id)
         return self._compose_account_state(account_id, account)
 
     async def _stop_account_linux_docker(
         self, account_id: str, account: dict
     ) -> dict | None:
         name = self._linux_docker_container_name(account)
+        # 停止时取消尚未完成的自动登录
+        pending = self._snowluma_auto_login_tasks.pop(account_id, None)
+        if pending is not None and not pending.done():
+            pending.cancel()
         runtime = self._runtimes.get(account_id) or self._runtime(account_id)
         async with runtime.lock:
             if runtime.drain_task and not runtime.drain_task.done():

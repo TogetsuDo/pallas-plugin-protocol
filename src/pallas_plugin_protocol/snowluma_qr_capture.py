@@ -27,6 +27,9 @@ REFRESH_SETTLE_SEC = 3.5
 QQ_LOGIN_REFRESH_CLICK_Y_RATIO = 0.62
 # 一键登录窗约 320×460：0.78 易点到页脚「账密登录」；0.68 对准蓝色「登录」
 QQ_LOGIN_QUICK_CLICK_Y_RATIO = 0.68
+# 扫码页「自动登录」圆钮：约在二维码卡片下方偏左（320×460 实测 ~133,372）
+QQ_AUTO_LOGIN_CHECKBOX_X_RATIO = 0.415
+QQ_AUTO_LOGIN_CHECKBOX_Y_RATIO = 0.81
 
 QQ_LOGIN_WINDOW_RE = re.compile(
     r'\s+(0x[0-9a-f]+)\s+"QQ":\s+\([^)]+\)\s+(\d+)x(\d+)\+',
@@ -241,6 +244,92 @@ def click_qq_login_window(
     exec_runner(container_name, ["sh", "-c", script], display=display)
     time.sleep(settle_sec)
     return True
+
+
+def click_qq_auto_login_checkbox(
+    container_name: str,
+    window_id: str,
+    width: int,
+    height: int,
+    *,
+    display: str = DEFAULT_DISPLAY,
+    run_exec: Any | None = None,
+    run_exec_text: Any | None = None,
+    run_exec_root: Any | None = None,
+) -> bool:
+    """勾选扫码/登录页「自动登录」，便于容器重建后 QQ 自行保持会话。"""
+    exec_runner = run_exec or _docker_exec
+    text_runner = run_exec_text or _docker_exec_text
+    root_runner = run_exec_root or _docker_exec_root
+    if not _command_available_in_container(
+        container_name, "xdotool", display=display, run_exec_text=text_runner
+    ):
+        ensure_container_xdotool(
+            container_name,
+            display=display,
+            run_exec_text=text_runner,
+            run_exec_root=root_runner,
+        )
+    if not _command_available_in_container(
+        container_name, "xdotool", display=display, run_exec_text=text_runner
+    ):
+        logger.info(
+            "SnowLuma 容器 {} 未安装 xdotool，无法勾选「自动登录」",
+            container_name,
+        )
+        return False
+    click_x = max(1, int(width * QQ_AUTO_LOGIN_CHECKBOX_X_RATIO))
+    click_y = max(1, int(height * QQ_AUTO_LOGIN_CHECKBOX_Y_RATIO))
+    script = (
+        f"xdotool windowactivate --sync {window_id} && "
+        f"xdotool mousemove --sync --window {window_id} {click_x} {click_y} && "
+        f"xdotool click 1"
+    )
+    exec_runner(container_name, ["sh", "-c", script], display=display)
+    time.sleep(0.6)
+    logger.info(
+        "SnowLuma 容器 {} 已点击 QQ「自动登录」勾选（{}x{} @ {},{}）",
+        container_name,
+        width,
+        height,
+        click_x,
+        click_y,
+    )
+    return True
+
+
+def ensure_qq_auto_login_checked(
+    account: dict,
+    *,
+    config: Any | None = None,
+    run_exec: Any | None = None,
+    run_exec_text: Any | None = None,
+    run_exec_root: Any | None = None,
+) -> bool:
+    """定位 QQ 登录窗并勾选「自动登录」。"""
+    if not account_uses_snowluma_docker(account):
+        return False
+    container = snowluma_docker_container_name(account)
+    display = snowluma_qr_capture_display(config)
+    login = locate_qq_login_window(
+        container,
+        display=display,
+        run_exec=run_exec,
+        run_exec_text=run_exec_text,
+    )
+    if login is None:
+        return False
+    window_id, width, height = login
+    return click_qq_auto_login_checkbox(
+        container,
+        window_id,
+        width,
+        height,
+        display=display,
+        run_exec=run_exec,
+        run_exec_text=run_exec_text,
+        run_exec_root=run_exec_root,
+    )
 
 
 def prepare_qq_login_for_capture(
@@ -567,12 +656,37 @@ def restore_snowluma_qq_login(
     account: dict,
     *,
     config: Any | None = None,
+    prefer_quick_login: bool = False,
     run_exec: Any | None = None,
     run_cp: Any | None = None,
     run_exec_text: Any | None = None,
     run_exec_root: Any | None = None,
 ) -> dict[str, Any]:
-    """恢复 QQ 登录：有二维码则写入 cache；否则自动点击「登录」。"""
+    """恢复 QQ 登录：有二维码则写入 cache；否则自动点击「登录」。
+
+    ``prefer_quick_login``：容器重启后常见「一键登录」窗时优先点「登录」，
+    避免先点扫码页「刷新」坐标误触。
+    """
+    ensure_qq_auto_login_checked(
+        account,
+        config=config,
+        run_exec=run_exec,
+        run_exec_text=run_exec_text,
+        run_exec_root=run_exec_root,
+    )
+    if prefer_quick_login:
+        clicked = attempt_snowluma_quick_login(
+            account,
+            config=config,
+            run_exec=run_exec,
+            run_exec_text=run_exec_text,
+            run_exec_root=run_exec_root,
+        )
+        if clicked:
+            return {
+                "mode": "quick_login",
+                "message": "已点击 QQ「登录」按钮，请稍候确认账号上线",
+            }
     path = capture_snowluma_qrcode_once(
         account,
         config=config,
@@ -599,6 +713,44 @@ def restore_snowluma_qq_login(
         "mode": "failed",
         "message": "未识别到二维码，且无法自动点击「登录」；请确认 QQ 登录窗已打开",
     }
+
+
+async def wait_and_restore_snowluma_qq_login(
+    account: dict,
+    *,
+    config: Any | None = None,
+    timeout_sec: float = 90.0,
+    initial_delay_sec: float | None = None,
+    poll_interval_sec: float = POLL_INTERVAL_SEC,
+    prefer_quick_login: bool = True,
+) -> dict[str, Any]:
+    """容器起来后轮询：优先一键登录；直到成功或超时。"""
+    delay = (
+        initial_delay_sec
+        if initial_delay_sec is not None
+        else snowluma_qr_capture_initial_delay(config)
+    )
+    if delay > 0:
+        await asyncio.sleep(delay)
+
+    deadline = asyncio.get_running_loop().time() + max(1.0, float(timeout_sec))
+    last: dict[str, Any] = {
+        "mode": "failed",
+        "message": "超时仍未识别到二维码或一键登录窗",
+    }
+    while asyncio.get_running_loop().time() < deadline:
+        restored = await asyncio.to_thread(
+            restore_snowluma_qq_login,
+            account,
+            config=config,
+            prefer_quick_login=prefer_quick_login,
+        )
+        last = restored
+        mode = str(restored.get("mode") or "")
+        if mode in {"qrcode", "quick_login"}:
+            return restored
+        await asyncio.sleep(poll_interval_sec)
+    return last
 
 
 async def wait_and_capture_snowluma_qrcode(
