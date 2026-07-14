@@ -5,6 +5,10 @@
 
 ## [Unreleased]
 
+## [4.0.27] - 2026-07-14
+
+- fix(relogin): 临时会话发二维码失败时兜底提示加好友，避免 matcher 整次崩溃
+
 ## [4.0.26] - 2026-07-14
 
 - refactor(web): 移除已迁入 Bot WebUI 的独立 HTML 页（`pages_pkg/`）与壳层静态 CSS，仅保留登录页字体片段与 favicon

@@ -95,7 +95,16 @@ async def send_reply_item(
         except Exception:
             await reply_private_message(bot, event, "二维码数据解码失败。")
             return
-        await reply_private_message(bot, event, MessageSegment.image(data))
+        try:
+            await reply_private_message(bot, event, MessageSegment.image(data))
+        except Exception:
+            # 群临时会话等场景发图可能失败；勿拖垮整次回复（前文案仍应送达）
+            await reply_private_message(
+                bot,
+                event,
+                "二维码图片发送失败。请先加好友后再私聊「牛牛重新上号」，"
+                "或到协议端控制台扫码登录。",
+            )
 
 
 relogin_forward_matcher = on_message(
