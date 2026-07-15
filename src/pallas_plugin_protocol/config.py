@@ -359,13 +359,6 @@ class Config(BaseModel):
             "Electron 建议 256m 及以上；留空使用 Docker 默认 64m",
         ),
     )
-    pallas_protocol_snowluma_docker_image: str = Field(
-        default="motricseven7/snowluma:latest",
-        description=field_help(
-            "SnowLuma 使用的 Docker 镜像名称",
-            "与 NapCat 镜像相互独立",
-        ),
-    )
     pallas_protocol_snowluma_docker_internal_webui_port: int = Field(
         default=5099,
         ge=1,

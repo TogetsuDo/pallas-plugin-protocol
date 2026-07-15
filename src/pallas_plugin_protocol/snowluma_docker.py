@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from typing import Any
+
 
 from . import docker_cli
 from .docker_onebot_host import docker_host_gateway_extra_args
@@ -14,14 +16,29 @@ snowluma_docker_container_running_sync = docker_cli.docker_inspect_running_sync
 snowluma_docker_remove_force = docker_cli.docker_rm_force_async
 snowluma_docker_remove_force_sync = docker_cli.docker_rm_force_sync
 
+SNOWLUMA_DOCKER_BASE_IMAGE = "motricseven7/snowluma:latest"
+SNOWLUMA_DOCKER_IMAGE = "pallas/snowluma-auto-login:latest"
+
+
+def snowluma_dockerfile() -> str:
+    return f"""FROM {SNOWLUMA_DOCKER_BASE_IMAGE}
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends xdotool && rm -rf /var/lib/apt/lists/*
+"""
+
+
 __all__ = [
     "append_snowluma_docker_resource_limits",
+    "SNOWLUMA_DOCKER_BASE_IMAGE",
+    "SNOWLUMA_DOCKER_IMAGE",
     "build_snowluma_docker_run_argv",
+    "snowluma_dockerfile",
     "snowluma_docker_container_name",
     "snowluma_docker_container_running",
     "snowluma_docker_container_running_sync",
     "snowluma_docker_effective_host_novnc_port",
     "snowluma_docker_effective_host_vnc_port",
+    "ensure_snowluma_docker_image",
     "snowluma_docker_program_dir_marker",
     "snowluma_docker_remove_force",
     "snowluma_docker_remove_force_sync",
@@ -29,6 +46,36 @@ __all__ = [
     "snowluma_docker_stop_sync",
     "snowluma_docker_volume_paths",
 ]
+
+
+def ensure_snowluma_docker_image() -> tuple[bool, str]:
+    """在首次使用前构建含 xdotool 的本地 SnowLuma 镜像。"""
+    try:
+        inspect = subprocess.run(
+            ["docker", "image", "inspect", SNOWLUMA_DOCKER_IMAGE],
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as err:
+        return False, f"检查 SnowLuma Docker 镜像失败：{err}"
+    if inspect.returncode == 0:
+        return True, ""
+    try:
+        build = subprocess.run(
+            ["docker", "build", "--tag", SNOWLUMA_DOCKER_IMAGE, "-"],
+            input=snowluma_dockerfile(),
+            text=True,
+            capture_output=True,
+            timeout=600,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as err:
+        return False, f"构建 SnowLuma Docker 镜像失败：{err}"
+    if build.returncode == 0:
+        return True, ""
+    output = (build.stdout or build.stderr or "").strip()
+    return False, f"构建 SnowLuma Docker 镜像失败：{output[-1200:]}"
 
 
 def snowluma_docker_container_name(account: dict) -> str:
@@ -99,10 +146,7 @@ def append_snowluma_docker_resource_limits(argv: list[str], config: Any) -> None
 
 def build_snowluma_docker_run_argv(account: dict, config: Any, resolve_qq) -> list[str]:
     _ = str(resolve_qq(account) or "").strip()
-    img = (
-        str(getattr(config, "pallas_protocol_snowluma_docker_image", "") or "").strip()
-        or "motricseven7/snowluma:latest"
-    )
+    img = SNOWLUMA_DOCKER_IMAGE
     in_webui = _internal_webui_port(config)
     in_http = _internal_onebot_http_port(config)
     in_ws = _internal_onebot_ws_port(config)
@@ -202,11 +246,7 @@ def build_snowluma_docker_run_argv(account: dict, config: Any, resolve_qq) -> li
 
 
 def snowluma_docker_program_dir_marker(config: Any) -> str:
-    img = (
-        str(getattr(config, "pallas_protocol_snowluma_docker_image", "") or "").strip()
-        or "motricseven7/snowluma:latest"
-    )
-    return f"docker:snowluma:{img}"
+    return f"docker:snowluma:{SNOWLUMA_DOCKER_IMAGE}"
 
 
 async def snowluma_docker_stop(name: str) -> None:

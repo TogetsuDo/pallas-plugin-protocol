@@ -144,26 +144,19 @@ async def finish_relogin_after_restart(
             meta = {}
 
         if str(meta.get("login_mode") or "") == "quick_login":
-            append_text(result, "已为你点击 QQ 一键登录，正在等待牛牛上线...")
+            append_text(result, "正在登录，请稍候。")
             if await wait_bot_connected_after_login(
                 protocol_manager, qq, timeout_sec=_RELOGIN_CONNECT_WAIT_SEC
             ):
                 append_text(result, "牛牛已重新上线。")
                 return
-            inject_err = str(meta.get("inject_hook_error") or "").strip()
-            hint = f"\n注入 Hook 失败：{inject_err}" if inject_err else ""
-            append_text(
-                result,
-                "一键登录已触发，但 "
-                f"{_RELOGIN_CONNECT_WAIT_SEC} 秒内牛牛未连上，请到协议端控制台查看或联系管理员。"
-                f"{hint}",
-            )
+            append_text(result, "登录超时，请稍后在协议端控制台查看。")
             return
 
         if meta.get("exists"):
             qr_path = protocol_manager.account_qrcode_path(qq)
             if qr_path is not None:
-                append_text(result, "启动完成，请使用下面二维码登录：")
+                append_text(result, "请扫描二维码完成登录。")
                 append_qrcode(result, qr_path)
                 return
 
@@ -178,7 +171,7 @@ async def finish_relogin_after_restart(
         )
         return
 
-    append_text(result, "启动完成，请使用下面二维码登录：")
+    append_text(result, "请扫描二维码完成登录。")
     append_qrcode(result, qr_path)
 
 

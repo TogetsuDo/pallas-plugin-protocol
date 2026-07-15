@@ -5,6 +5,12 @@
 
 ## [Unreleased]
 
+## [4.0.31] - 2026-07-15
+
+- fix(snowluma): Linux Docker 改用本地构建的 `pallas/snowluma-auto-login:latest`（固定 `motricseven7/snowluma:latest` 基础镜像并预装 xdotool）；运行时配置不再接受 SnowLuma 镜像覆盖。
+- fix(snowluma): 旧会话失效时先关闭 xmessage 提示并重新定位 QQ 窗；识别到二维码即停止点击，移除运行中安装 xdotool。
+- fix(relogin): SnowLuma 一键登录、二维码、超时回复改为简洁文案，避免泄漏 inject hook 原始错误。
+
 ## [4.0.30] - 2026-07-14
 
 - fix(web): 旧 `/protocol/console` 页面及登录壳仅保留无鉴权 307 兼容跳转，正式入口统一为 `/pallas/protocol`

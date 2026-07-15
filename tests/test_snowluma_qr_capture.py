@@ -191,7 +191,6 @@ def test_click_qq_auto_login_checkbox_coords() -> None:
         460,
         run_exec=fake_exec,
         run_exec_text=fake_text,
-        run_exec_root=lambda *a, **k: 0,
     )
     assert ok
     assert calls
@@ -229,7 +228,7 @@ def test_restore_snowluma_qq_login_prefer_quick_login(tmp_path: Path) -> None:
     ):
         out = qr_capture.restore_snowluma_qq_login(account, prefer_quick_login=True)
     assert out["mode"] == "quick_login"
-    assert calls == ["quick"]
+    assert calls == ["capture", "quick"]
 
 
 @pytest.mark.asyncio
@@ -295,14 +294,12 @@ def test_restore_snowluma_qq_login_quick_login(tmp_path: Path) -> None:
             return_value=fake_screen.getvalue(),
         ),
         patch.object(qr_capture, "extract_qr_png_from_screen", return_value=None),
-        patch.object(qr_capture, "ensure_container_xdotool", return_value=True),
         patch.object(qr_capture, "_command_available_in_container", return_value=True),
     ):
         out = qr_capture.restore_snowluma_qq_login(
             account,
             run_exec=fake_exec,
             run_exec_text=fake_window_tree,
-            run_exec_root=lambda *a, **k: 0,
         )
     assert out["mode"] == "quick_login"
     assert click_calls
@@ -367,3 +364,91 @@ def test_capture_screen_png_from_xwd_fallback() -> None:
         xwd_to_png=fake_convert,
     )
     assert out == fake_png
+
+
+def test_attempt_quick_login_dismisses_only_expired_session_prompt() -> None:
+    account = {
+        "id": "expired",
+        "protocol_backend": "snowluma",
+        "snowluma_linux_docker": True,
+    }
+    calls: list[tuple[list[str], str]] = []
+    trees = iter(
+        (
+            ' 0x1 "xmessage": ("xmessage" "Xmessage") 578x96+0+0\n'
+            ' 0x2 "QQ": ("qq" "QQ") 320x460+0+0',
+            ' 0x2 "QQ": ("qq" "QQ") 320x460+0+0',
+        )
+    )
+
+    def text_runner(_container: str, cmd: list[str], *, display: str) -> str:
+        if cmd == ["xwininfo", "-root", "-tree"]:
+            return next(trees)
+        assert cmd == ["xprop", "-id", "0x1", "WM_NAME"]
+        return 'WM_NAME(STRING) = "账号当前登录已失效"'
+
+    def exec_runner(_container: str, cmd: list[str], *, display: str) -> int:
+        calls.append((cmd, display))
+        return 0
+
+    with patch.object(qr_capture, "_command_available_in_container", return_value=True):
+        assert qr_capture.attempt_snowluma_quick_login(
+            account, run_exec=exec_runner, run_exec_text=text_runner
+        )
+    assert calls[0][0] == ["xkill", "-id", "0x1"]
+    assert "click 1" in calls[1][0][2]
+
+
+def test_attempt_quick_login_does_not_dismiss_unrecognized_xmessage() -> None:
+    account = {
+        "id": "other-message",
+        "protocol_backend": "snowluma",
+        "snowluma_linux_docker": True,
+    }
+    calls: list[list[str]] = []
+
+    def text_runner(_container: str, cmd: list[str], *, display: str) -> str:
+        if cmd == ["xwininfo", "-root", "-tree"]:
+            return (
+                ' 0x1 "xmessage": ("xmessage" "Xmessage") 578x96+0+0\n'
+                ' 0x2 "QQ": ("qq" "QQ") 320x460+0+0'
+            )
+        assert cmd == ["xprop", "-id", "0x1", "WM_NAME"]
+        return 'WM_NAME(STRING) = "其他提示"'
+
+    def exec_runner(_container: str, cmd: list[str], *, display: str) -> int:
+        calls.append(cmd)
+        return 0
+
+    assert not qr_capture.attempt_snowluma_quick_login(
+        account, run_exec=exec_runner, run_exec_text=text_runner
+    )
+    assert calls == []
+
+
+def test_restore_stops_at_recognized_qrcode_without_click(tmp_path: Path) -> None:
+    account = {
+        "id": "qr",
+        "protocol_backend": "snowluma",
+        "snowluma_linux_docker": True,
+        "account_data_dir": str(tmp_path),
+    }
+    with (
+        patch.object(
+            qr_capture,
+            "capture_snowluma_qrcode_once",
+            return_value=tmp_path / "cache" / "qrcode.png",
+        ),
+        patch.object(qr_capture, "ensure_qq_auto_login_checked") as auto_login,
+        patch.object(qr_capture, "attempt_snowluma_quick_login") as quick_login,
+    ):
+        out = qr_capture.restore_snowluma_qq_login(account, prefer_quick_login=False)
+    assert out["mode"] == "qrcode"
+    auto_login.assert_not_called()
+    quick_login.assert_not_called()
+
+
+def test_qr_capture_has_no_runtime_package_install() -> None:
+    source = Path(qr_capture.__file__).read_text()
+    assert "ensure_container_xdotool" not in source
+    assert "apt-get install" not in source

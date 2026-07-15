@@ -167,12 +167,6 @@ class PallasProtocolService:
         return "shell"
 
     def runtime_profile(self) -> dict[str, object]:
-        default_sl_img = (
-            str(
-                getattr(self._config, "pallas_protocol_snowluma_docker_image", "") or ""
-            ).strip()
-            or "motricseven7/snowluma:latest"
-        )
         def_mode = self._default_runtime_mode()
         default = {
             "runtime_mode": def_mode,
@@ -183,7 +177,6 @@ class PallasProtocolService:
                 getattr(self._config, "pallas_protocol_docker_image", "") or ""
             ).strip()
             or "mlikiowa/napcat-docker:latest",
-            "snowluma_docker_image": default_sl_img,
             "follow_bot_lifecycle": bool(
                 getattr(self._config, "pallas_protocol_follow_bot_lifecycle", True)
             ),
@@ -203,10 +196,6 @@ class PallasProtocolService:
         if platform not in ("auto", "linux-amd64", "linux-arm64", "windows-amd64"):
             platform = "auto"
         image = str(raw.get("docker_image", "")).strip() or default["docker_image"]
-        sl_img = (
-            str(raw.get("snowluma_docker_image", "")).strip()
-            or default["snowluma_docker_image"]
-        )
         follow = raw.get("follow_bot_lifecycle", default["follow_bot_lifecycle"])
         if isinstance(follow, str):
             follow = follow.strip().lower() in ("1", "true", "yes", "on")
@@ -218,7 +207,6 @@ class PallasProtocolService:
             "snowluma_runtime_mode": snow,
             "target_platform": platform,
             "docker_image": image,
-            "snowluma_docker_image": sl_img,
             "follow_bot_lifecycle": follow,
         }
 
@@ -238,13 +226,6 @@ class PallasProtocolService:
         image = (
             str(p.get("docker_image", "")).strip() or "mlikiowa/napcat-docker:latest"
         )
-        sl_img = (
-            str(p.get("snowluma_docker_image", "")).strip()
-            or str(
-                getattr(self._config, "pallas_protocol_snowluma_docker_image", "") or ""
-            ).strip()
-            or "motricseven7/snowluma:latest"
-        )
         follow = p.get("follow_bot_lifecycle", True)
         if isinstance(follow, str):
             follow = follow.strip().lower() in ("1", "true", "yes", "on")
@@ -254,7 +235,6 @@ class PallasProtocolService:
         if nap == "docker":
             self._config.pallas_protocol_docker_image = image
         self._config.pallas_protocol_snowluma_linux_use_docker = snow == "docker"
-        self._config.pallas_protocol_snowluma_docker_image = sl_img
         self._config.pallas_protocol_follow_bot_lifecycle = bool(follow)
 
     async def update_runtime_profile(self, payload: dict) -> dict[str, object]:
@@ -291,16 +271,6 @@ class PallasProtocolService:
             str(payload.get("docker_image", current["docker_image"])).strip()
             or current["docker_image"]
         )
-        sl_image = str(
-            payload.get(
-                "snowluma_docker_image", current.get("snowluma_docker_image", "")
-            )
-        ).strip()
-        if not sl_image:
-            sl_image = (
-                str(current.get("snowluma_docker_image", "") or "").strip()
-                or "motricseven7/snowluma:latest"
-            )
         follow = payload.get("follow_bot_lifecycle", current["follow_bot_lifecycle"])
         if isinstance(follow, str):
             follow = follow.strip().lower() in ("1", "true", "yes", "on")
@@ -312,7 +282,6 @@ class PallasProtocolService:
             "snowluma_runtime_mode": snow,
             "target_platform": platform,
             "docker_image": image,
-            "snowluma_docker_image": sl_image,
             "follow_bot_lifecycle": follow,
         }
         self._runtime_profile_path.write_text(
@@ -614,16 +583,9 @@ class PallasProtocolService:
             )
             want_repo = docker_repository_from_ref(ref)
         elif proto == "snowluma":
-            p = self.runtime_profile()
-            ref = (
-                str(p.get("snowluma_docker_image", "")).strip()
-                or str(
-                    getattr(self._config, "pallas_protocol_snowluma_docker_image", "")
-                    or ""
-                ).strip()
-                or "motricseven7/snowluma:latest"
-            )
-            want_repo = docker_repository_from_ref(ref)
+            from .snowluma_docker import SNOWLUMA_DOCKER_IMAGE
+
+            want_repo = docker_repository_from_ref(SNOWLUMA_DOCKER_IMAGE)
 
         proc = await asyncio.create_subprocess_exec(
             "docker",
@@ -2158,8 +2120,13 @@ class PallasProtocolService:
         be = self._protocol_runtime_backend(account)
         from .snowluma_docker import (
             build_snowluma_docker_run_argv,
+            ensure_snowluma_docker_image,
             snowluma_docker_container_running_sync,
         )
+
+        built, build_error = await asyncio.to_thread(ensure_snowluma_docker_image)
+        if not built:
+            raise ValueError(build_error)
 
         await self._remove_both_linux_docker_container_names_for_account(account)
         if os.name == "nt":
