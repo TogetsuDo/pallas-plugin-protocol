@@ -127,6 +127,9 @@ def test_snowluma_dockerfile_pins_base_image_and_installs_xdotool() -> None:
     assert "USER root" in dockerfile
     assert "USER snowluma" not in dockerfile
     assert "xdotool" in dockerfile
+    assert "imagemagick" in dockerfile
+    assert "tesseract-ocr" in dockerfile
+    assert "tesseract-ocr-chi-sim" in dockerfile
     assert "apt-get update" in dockerfile
 
 

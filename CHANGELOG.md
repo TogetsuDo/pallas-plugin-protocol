@@ -5,6 +5,13 @@
 
 ## [Unreleased]
 
+## [4.0.32] - 2026-07-16
+
+- fix(snowluma): 补齐 QQ 恢复登录状态机：识别并关闭 `fbsetbg` 桌面报错，处理下线通知、身份失效与连续确认弹窗；结果收敛为成功登录或可发送二维码。
+- fix(snowluma): 已过期二维码自动刷新；二维码页检测「自动登录」蓝色勾选，未勾选时点击并复检，避免一键登录切页后状态丢失。
+- fix(snowluma): 自动登录镜像预装 ImageMagick、Tesseract 与中文 OCR 数据，避免容器运行时缺少弹窗识别依赖。
+- fix(relogin): SnowLuma 容器已运行时直接执行恢复流程，不再无谓重启容器。
+
 ## [4.0.31] - 2026-07-15
 
 - fix(snowluma): Linux Docker 改用本地构建的 `pallas/snowluma-auto-login:latest`（固定 `motricseven7/snowluma:latest` 基础镜像并预装 xdotool）；运行时配置不再接受 SnowLuma 镜像覆盖。

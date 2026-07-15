@@ -184,8 +184,19 @@ async def run_relogin_restart(qq: str, result: ReloginHandleResult) -> None:
         append_text(result, "账号目录缺失，无法执行重新上号。")
         return
 
-    append_text(result, "正在启动协议端...")
+    from pallas_plugin_protocol.snowluma_qr_capture import account_uses_snowluma_docker
+
     started_at = datetime.now().astimezone()
+    if account_uses_snowluma_docker(
+        account
+    ) and protocol_manager._linux_docker_container_running_sync(account):
+        append_text(result, "正在恢复登录...")
+        await finish_relogin_after_restart(
+            protocol_manager, qq, account, result, started_at=started_at
+        )
+        return
+
+    append_text(result, "正在启动协议端...")
     try:
         await protocol_manager.restart_account(qq)
     except Exception as err:

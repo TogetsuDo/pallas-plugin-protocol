@@ -23,7 +23,7 @@ SNOWLUMA_DOCKER_IMAGE = "pallas/snowluma-auto-login:latest"
 def snowluma_dockerfile() -> str:
     return f"""FROM {SNOWLUMA_DOCKER_BASE_IMAGE}
 USER root
-RUN apt-get update && apt-get install -y --no-install-recommends xdotool && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends xdotool imagemagick tesseract-ocr tesseract-ocr-chi-sim && rm -rf /var/lib/apt/lists/*
 """
 
 

@@ -27,6 +27,12 @@ QQ_LOGIN_QUICK_CLICK_Y_RATIO = 0.68
 # 扫码页「自动登录」圆钮：约在二维码卡片下方偏左（320×460 实测 ~133,372）
 QQ_AUTO_LOGIN_CHECKBOX_X_RATIO = 0.415
 QQ_AUTO_LOGIN_CHECKBOX_Y_RATIO = 0.81
+# QQ 原生“身份失效”弹窗的确定按钮，基于 320×460 登录窗实测位置。
+QQ_LOGIN_FAILURE_CONFIRM_X_RATIO = 0.75
+QQ_LOGIN_FAILURE_CONFIRM_Y_RATIO = 0.60
+# QQ 二维码过期遮罩的「刷新」按钮，基于 320×460 登录窗实测位置。
+QQ_EXPIRED_QRCODE_REFRESH_X_RATIO = 0.50
+QQ_EXPIRED_QRCODE_REFRESH_Y_RATIO = 0.61
 
 QQ_LOGIN_WINDOW_RE = re.compile(
     r'\s+(0x[0-9a-f]+)\s+"QQ":\s+\([^)]+\)\s+(\d+)x(\d+)\+',
@@ -38,6 +44,15 @@ XMESSAGE_WINDOW_RE = re.compile(
 )
 QQ_LOGIN_QR_HOST_MARKERS = ("qq.com", "q.qq.com", "txz.qq.com")
 EXPIRED_SESSION_MESSAGE = "账号当前登录已失效"
+QQ_LOGIN_FAILURE_TEXT_MARKERS = (
+    "身份验证失败",
+    "身份验证失效",
+    "用户身份已失效",
+    "当前登录已失效",
+)
+QQ_EXPIRED_QRCODE_TEXT_MARKER = "当前二维码已过期"
+XMESSAGE_DISMISSABLE_TEXT_MARKERS = ("fbsetbg:",)
+OCR_UNAVAILABLE_SENTINEL = "__PALLAS_OCR_UNAVAILABLE__"
 
 
 def account_qrcode_cache_path(account_data_dir: Path) -> Path:
@@ -122,6 +137,168 @@ def xmessage_is_expired_session(
     return EXPIRED_SESSION_MESSAGE in title
 
 
+def is_known_dismissable_xmessage_text(text: str) -> bool:
+    """仅关闭 SnowLuma 桌面已知的无关报错，未知 xmessage 保持不动。"""
+    normalized = (text or "").casefold()
+    return any(marker in normalized for marker in XMESSAGE_DISMISSABLE_TEXT_MARKERS)
+
+
+def xmessage_is_known_dismissable(
+    container_name: str,
+    window_id: str,
+    *,
+    display: str = DEFAULT_DISPLAY,
+    run_exec: Any | None = None,
+    run_exec_text: Any | None = None,
+) -> bool:
+    """确认 xmessage 是已知失效提示或 fbsetbg 桌面报错。"""
+    exec_runner = run_exec or _docker_exec
+    text_runner = run_exec_text or _docker_exec_text
+    if xmessage_is_expired_session(
+        container_name,
+        window_id,
+        display=display,
+        run_exec_text=text_runner,
+    ):
+        return True
+    if (
+        exec_runner(
+            container_name,
+            ["xwd", "-id", window_id, "-silent", "-out", REMOTE_XWD_PATH],
+            display=display,
+        )
+        != 0
+    ):
+        return False
+    text = text_runner(
+        container_name,
+        [
+            "sh",
+            "-c",
+            "if command -v tesseract >/dev/null 2>&1 && command -v convert >/dev/null 2>&1; then "
+            f"convert {REMOTE_XWD_PATH} png:- 2>/dev/null | tesseract stdin stdout -l chi_sim+eng 2>/dev/null; "
+            f"else printf '{OCR_UNAVAILABLE_SENTINEL}'; fi",
+        ],
+        display=display,
+    )
+    return OCR_UNAVAILABLE_SENTINEL not in text and is_known_dismissable_xmessage_text(
+        text
+    )
+
+
+def is_known_qq_login_failure_text(text: str) -> bool:
+    """仅匹配已人工确认的 QQ 原生失效弹窗，避免误点未知对话框。"""
+    return any(marker in (text or "") for marker in QQ_LOGIN_FAILURE_TEXT_MARKERS)
+
+
+def is_known_qq_expired_qrcode_text(text: str) -> bool:
+    """仅匹配 QQ 二维码过期遮罩，避免误点登录窗。"""
+    return QQ_EXPIRED_QRCODE_TEXT_MARKER in (text or "")
+
+
+def click_known_qq_expired_qrcode_refresh(
+    container_name: str,
+    window_id: str,
+    width: int,
+    height: int,
+    *,
+    display: str = DEFAULT_DISPLAY,
+    run_exec: Any | None = None,
+    run_exec_text: Any | None = None,
+) -> bool | None:
+    """识别 QQ 已过期二维码遮罩后点击「刷新」。"""
+    exec_runner = run_exec or _docker_exec
+    text_runner = run_exec_text or _docker_exec_text
+    if (
+        exec_runner(
+            container_name,
+            ["xwd", "-id", window_id, "-silent", "-out", REMOTE_XWD_PATH],
+            display=display,
+        )
+        != 0
+    ):
+        return None
+    text = text_runner(
+        container_name,
+        [
+            "sh",
+            "-c",
+            "if command -v tesseract >/dev/null 2>&1 && command -v convert >/dev/null 2>&1; then "
+            f"convert {REMOTE_XWD_PATH} png:- 2>/dev/null | tesseract stdin stdout -l chi_sim+eng 2>/dev/null; "
+            f"else printf '{OCR_UNAVAILABLE_SENTINEL}'; fi",
+        ],
+        display=display,
+    )
+    if OCR_UNAVAILABLE_SENTINEL in text:
+        return None
+    if not is_known_qq_expired_qrcode_text(text):
+        return False
+    click_x = max(1, int(width * QQ_EXPIRED_QRCODE_REFRESH_X_RATIO))
+    click_y = max(1, int(height * QQ_EXPIRED_QRCODE_REFRESH_Y_RATIO))
+    script = (
+        f"xdotool windowactivate --sync {window_id} && "
+        f"xdotool mousemove --window {window_id} {click_x} {click_y} click 1"
+    )
+    if exec_runner(container_name, ["sh", "-c", script], display=display) != 0:
+        return False
+    time.sleep(2.0)
+    logger.info("SnowLuma 容器 {} 已刷新过期 QQ 二维码", container_name)
+    return True
+
+
+def confirm_known_qq_login_failure_dialog(
+    container_name: str,
+    window_id: str,
+    width: int,
+    height: int,
+    *,
+    display: str = DEFAULT_DISPLAY,
+    run_exec: Any | None = None,
+    run_exec_text: Any | None = None,
+) -> bool | None:
+    """OCR 识别已知身份失效提示后点击“确定”。
+
+    返回 ``None`` 表示 OCR 不可用，调用方不会继续点击 QQ 登录窗。
+    """
+    exec_runner = run_exec or _docker_exec
+    text_runner = run_exec_text or _docker_exec_text
+    if (
+        exec_runner(
+            container_name,
+            ["xwd", "-id", window_id, "-silent", "-out", REMOTE_XWD_PATH],
+            display=display,
+        )
+        != 0
+    ):
+        return None
+    text = text_runner(
+        container_name,
+        [
+            "sh",
+            "-c",
+            "if command -v tesseract >/dev/null 2>&1 && command -v convert >/dev/null 2>&1; then "
+            f"convert {REMOTE_XWD_PATH} png:- 2>/dev/null | tesseract stdin stdout -l chi_sim+eng 2>/dev/null; "
+            f"else printf '{OCR_UNAVAILABLE_SENTINEL}'; fi",
+        ],
+        display=display,
+    )
+    if OCR_UNAVAILABLE_SENTINEL in text:
+        return None
+    if not is_known_qq_login_failure_text(text):
+        return False
+    click_x = max(1, int(width * QQ_LOGIN_FAILURE_CONFIRM_X_RATIO))
+    click_y = max(1, int(height * QQ_LOGIN_FAILURE_CONFIRM_Y_RATIO))
+    script = (
+        f"xdotool windowactivate --sync {window_id} && "
+        f"xdotool mousemove --window {window_id} {click_x} {click_y} click 1"
+    )
+    if exec_runner(container_name, ["sh", "-c", script], display=display) != 0:
+        return False
+    time.sleep(1.0)
+    logger.info("SnowLuma 容器 {} 已确认 QQ 身份失效提示", container_name)
+    return True
+
+
 def locate_qq_login_window(
     container_name: str,
     *,
@@ -140,10 +317,11 @@ def locate_qq_login_window(
         return None
     xmessage_ids = list_xmessage_window_ids(tree)
     if xmessage_ids:
-        if len(xmessage_ids) != 1 or not xmessage_is_expired_session(
+        if len(xmessage_ids) != 1 or not xmessage_is_known_dismissable(
             container_name,
             xmessage_ids[0],
             display=display,
+            run_exec=exec_runner,
             run_exec_text=text_runner,
         ):
             return None
@@ -159,6 +337,30 @@ def locate_qq_login_window(
         )
         if not tree or list_xmessage_window_ids(tree):
             return None
+    login = find_qq_login_window(tree)
+    if login is None:
+        return None
+    window_id, width, height = login
+    confirmed = confirm_known_qq_login_failure_dialog(
+        container_name,
+        window_id,
+        width,
+        height,
+        display=display,
+        run_exec=exec_runner,
+        run_exec_text=text_runner,
+    )
+    if confirmed is None:
+        return None
+    if not confirmed:
+        return login
+    tree = text_runner(
+        container_name,
+        ["xwininfo", "-root", "-tree"],
+        display=display,
+    )
+    if not tree or list_xmessage_window_ids(tree):
+        return None
     return find_qq_login_window(tree)
 
 
@@ -221,7 +423,8 @@ def click_qq_auto_login_checkbox(
         f"xdotool mousemove --sync --window {window_id} {click_x} {click_y} && "
         f"xdotool click 1"
     )
-    exec_runner(container_name, ["sh", "-c", script], display=display)
+    if exec_runner(container_name, ["sh", "-c", script], display=display) != 0:
+        return False
     time.sleep(0.6)
     logger.info(
         "SnowLuma 容器 {} 已点击 QQ「自动登录」勾选（{}x{} @ {},{}）",
@@ -234,14 +437,41 @@ def click_qq_auto_login_checkbox(
     return True
 
 
+def qq_auto_login_checkbox_is_checked(
+    screen_png: bytes,
+    width: int,
+    height: int,
+) -> bool:
+    """按二维码页圆钮的 QQ 蓝色像素判断「自动登录」是否已选中。"""
+    try:
+        from PIL import Image
+
+        image = Image.open(io.BytesIO(screen_png)).convert("RGB")
+    except Exception:
+        return False
+    center_x = max(1, min(image.width - 1, int(width * QQ_AUTO_LOGIN_CHECKBOX_X_RATIO)))
+    center_y = max(
+        1, min(image.height - 1, int(height * QQ_AUTO_LOGIN_CHECKBOX_Y_RATIO))
+    )
+    blue_pixels = 0
+    for x in range(max(0, center_x - 7), min(image.width, center_x + 8)):
+        for y in range(max(0, center_y - 7), min(image.height, center_y + 8)):
+            red, green, blue = image.getpixel((x, y))
+            if red <= 80 and 110 <= green <= 190 and blue >= 200:
+                blue_pixels += 1
+    return blue_pixels >= 12
+
+
 def ensure_qq_auto_login_checked(
     account: dict,
     *,
     config: Any | None = None,
     run_exec: Any | None = None,
+    run_cp: Any | None = None,
     run_exec_text: Any | None = None,
+    screen_png: bytes | None = None,
 ) -> bool:
-    """定位 QQ 登录窗并勾选「自动登录」。"""
+    """定位 QQ 登录窗，确认「自动登录」勾选状态后按需点击。"""
     if not account_uses_snowluma_docker(account):
         return False
     container = snowluma_docker_container_name(account)
@@ -255,7 +485,16 @@ def ensure_qq_auto_login_checked(
     if login is None:
         return False
     window_id, width, height = login
-    return click_qq_auto_login_checkbox(
+    before = screen_png or capture_screen_png_from_container(
+        container,
+        display=display,
+        window_id=window_id,
+        run_exec=run_exec,
+        run_cp=run_cp,
+    )
+    if before and qq_auto_login_checkbox_is_checked(before, width, height):
+        return True
+    clicked = click_qq_auto_login_checkbox(
         container,
         window_id,
         width,
@@ -264,6 +503,16 @@ def ensure_qq_auto_login_checked(
         run_exec=run_exec,
         run_exec_text=run_exec_text,
     )
+    if not clicked:
+        return False
+    after = capture_screen_png_from_container(
+        container,
+        display=display,
+        window_id=window_id,
+        run_exec=run_exec,
+        run_cp=run_cp,
+    )
+    return bool(after and qq_auto_login_checkbox_is_checked(after, width, height))
 
 
 def attempt_snowluma_quick_login(
@@ -518,7 +767,39 @@ def capture_snowluma_qrcode_once(
 
     qr_png = extract_qr_png_from_screen(screen)
     if qr_png:
+        ensure_qq_auto_login_checked(
+            account,
+            config=config,
+            run_exec=run_exec,
+            run_cp=run_cp,
+            run_exec_text=run_exec_text,
+            screen_png=screen,
+        )
         return write_qrcode_cache(account_data_dir, qr_png)
+
+    refreshed = click_known_qq_expired_qrcode_refresh(
+        container,
+        window_id,
+        width,
+        height,
+        display=display,
+        run_exec=run_exec,
+        run_exec_text=run_exec_text,
+    )
+    if refreshed:
+        screen = capture_once()
+        if screen:
+            qr_png = extract_qr_png_from_screen(screen)
+            if qr_png:
+                ensure_qq_auto_login_checked(
+                    account,
+                    config=config,
+                    run_exec=run_exec,
+                    run_cp=run_cp,
+                    run_exec_text=run_exec_text,
+                    screen_png=screen,
+                )
+                return write_qrcode_cache(account_data_dir, qr_png)
 
     logger.debug(
         "SnowLuma 截屏未识别到有效 QQ 登录二维码（可能为一键登录界面或仍在加载）: container={}",
@@ -563,6 +844,16 @@ def restore_snowluma_qq_login(
         run_exec_text=run_exec_text,
     )
     if clicked:
+        # QQ 点击一键登录后可能继续弹出失效确认框；再次捕获会确认它并取二维码。
+        path = capture_snowluma_qrcode_once(
+            account,
+            config=config,
+            run_exec=run_exec,
+            run_cp=run_cp,
+            run_exec_text=run_exec_text,
+        )
+        if path is not None:
+            return {"mode": "qrcode", "qrcode_path": str(path)}
         return {
             "mode": "quick_login",
             "message": "已点击 QQ「登录」按钮，请稍候确认账号上线",
