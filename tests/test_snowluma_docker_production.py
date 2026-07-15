@@ -42,6 +42,7 @@ append_snowluma_docker_resource_limits = (
 build_snowluma_docker_run_argv = snowluma_docker.build_snowluma_docker_run_argv
 snowluma_docker_program_dir_marker = snowluma_docker.snowluma_docker_program_dir_marker
 snowluma_dockerfile = snowluma_docker.snowluma_dockerfile
+clear_snowluma_login_state = snowluma_docker.clear_snowluma_login_state
 
 
 def test_append_snowluma_docker_resource_limits() -> None:
@@ -153,3 +154,28 @@ def test_ensure_snowluma_docker_image_builds_local_tag(monkeypatch) -> None:
     ]
     assert "FROM motricseven7/snowluma:latest" in str(calls[1][1])
     assert "xdotool" in str(calls[1][1])
+
+
+def test_clear_snowluma_login_state_preserves_snowluma_config(tmp_path: Path) -> None:
+    account_data_dir = tmp_path / "instance" / "snowluma"
+    base = account_data_dir / "docker" / "snowluma"
+    config = base / "snowluma-data"
+    dot_config = base / "dot-config"
+    dot_local_share = base / "dot-local-share"
+    (config / "config").mkdir(parents=True)
+    dot_config.mkdir(parents=True)
+    dot_local_share.mkdir(parents=True)
+    (config / "config" / "onebot.json").write_text("{}")
+    (dot_config / "qq-session").write_text("expired")
+    (dot_local_share / "qq-cache").write_text("expired")
+    qr_cache = account_data_dir / "cache" / "qrcode.png"
+    qr_cache.parent.mkdir(parents=True)
+    qr_cache.write_bytes(b"expired")
+
+    cleared = clear_snowluma_login_state({"account_data_dir": str(account_data_dir)})
+
+    assert cleared == 3
+    assert (config / "config" / "onebot.json").is_file()
+    assert not dot_config.exists()
+    assert not dot_local_share.exists()
+    assert not qr_cache.exists()

@@ -119,6 +119,13 @@ async def relogin_forward_handler(bot: Bot, event: PrivateMessageEvent):
     text = (event.get_plaintext() or "").strip()
     key = (str(bot.self_id), str(event.user_id))
 
+    if key in _active_sessions:
+        normalized = text.casefold()
+        if normalized in {"是", "yes", "y"}:
+            await reply_private_message(bot, event, "正在重置登录态")
+        elif normalized in {"否", "no", "n"}:
+            await reply_private_message(bot, event, "正在恢复登录")
+
     result = await forward_relogin_to_hub(
         bot_id=str(bot.self_id),
         user_id=str(event.user_id),

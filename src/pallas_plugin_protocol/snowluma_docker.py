@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -32,6 +33,7 @@ __all__ = [
     "SNOWLUMA_DOCKER_BASE_IMAGE",
     "SNOWLUMA_DOCKER_IMAGE",
     "build_snowluma_docker_run_argv",
+    "clear_snowluma_login_state",
     "snowluma_dockerfile",
     "snowluma_docker_container_name",
     "snowluma_docker_container_running",
@@ -86,6 +88,29 @@ def snowluma_docker_volume_paths(account: dict) -> tuple[Path, Path, Path]:
     ad = Path(str(account.get("account_data_dir", "")).strip()).resolve()
     base = ad / "docker" / "snowluma"
     return base / "snowluma-data", base / "dot-config", base / "dot-local-share"
+
+
+def clear_snowluma_login_state(account: dict) -> int:
+    """清理 QQ 本地登录态，保留 SnowLuma 与 OneBot 配置卷。"""
+    account_data_dir = Path(str(account.get("account_data_dir", "")).strip()).resolve()
+    if not str(account.get("account_data_dir", "")).strip():
+        raise ValueError("账号目录缺失")
+    _, dot_config, dot_local_share = snowluma_docker_volume_paths(account)
+    targets = [dot_config, dot_local_share, account_data_dir / "cache" / "qrcode.png"]
+    cleared = 0
+    for target in targets:
+        if account_data_dir not in target.resolve().parents:
+            raise ValueError("登录态路径不在账号目录内")
+        try:
+            if target.is_dir():
+                shutil.rmtree(target)
+                cleared += 1
+            elif target.is_file():
+                target.unlink()
+                cleared += 1
+        except OSError as err:
+            raise ValueError(f"清理登录态失败：{err}") from err
+    return cleared
 
 
 def _internal_webui_port(config: Any) -> int:

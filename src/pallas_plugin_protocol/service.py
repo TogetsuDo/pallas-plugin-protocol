@@ -2292,6 +2292,19 @@ class PallasProtocolService:
         await self.stop_account(account_id)
         return await self.start_account(account_id)
 
+    async def reset_snowluma_login_state_and_recreate(self, account_id: str) -> dict:
+        account = self._accounts.get(account_id)
+        if not account:
+            raise KeyError("账号不存在")
+        if not account_uses_snowluma_docker(account):
+            raise ValueError("当前账号不是 SnowLuma Docker")
+        await self.stop_account(account_id)
+        await self._remove_snowluma_linux_docker_container_for_account(account)
+        from .snowluma_docker import clear_snowluma_login_state
+
+        await asyncio.to_thread(clear_snowluma_login_state, account)
+        return await self.start_account(account_id)
+
     def batch_coordinator(self) -> AccountBatchCoordinator:
         return self._batch
 

@@ -19,6 +19,8 @@ from pallas.core.platform.shard.coord.relogin_payload import (
 )
 
 _CANCEL_WORDS = {"取消", "cancel", "退出", "quit"}
+_RISK_DEVICE_YES = {"是", "yes", "y"}
+_RISK_DEVICE_NO = {"否", "no", "n"}
 
 
 @dataclass
@@ -49,6 +51,15 @@ def user_is_superuser_id(user_id: str) -> bool:
 def extract_qq(arg: str) -> str:
     text = (arg or "").strip()
     return text if text.isdigit() else ""
+
+
+def parse_risk_device_answer(text: str) -> bool | None:
+    answer = (text or "").strip().casefold()
+    if answer in _RISK_DEVICE_YES:
+        return True
+    if answer in _RISK_DEVICE_NO:
+        return False
+    return None
 
 
 async def bot_id_exists_in_db(bot_id: int) -> bool:
@@ -175,7 +186,12 @@ async def finish_relogin_after_restart(
     append_qrcode(result, qr_path)
 
 
-async def run_relogin_restart(qq: str, result: ReloginHandleResult) -> None:
+async def run_relogin_restart(
+    qq: str,
+    result: ReloginHandleResult,
+    *,
+    reset_login_state: bool = False,
+) -> None:
     from pallas_plugin_protocol import manager as protocol_manager
 
     account = protocol_manager.get_account(qq) or {}
@@ -187,6 +203,17 @@ async def run_relogin_restart(qq: str, result: ReloginHandleResult) -> None:
     from pallas_plugin_protocol.snowluma_qr_capture import account_uses_snowluma_docker
 
     started_at = datetime.now().astimezone()
+    if reset_login_state:
+        try:
+            await protocol_manager.reset_snowluma_login_state_and_recreate(qq)
+        except (KeyError, ValueError) as err:
+            append_text(result, f"重置登录态失败：{err}")
+            return
+        await finish_relogin_after_restart(
+            protocol_manager, qq, account, result, started_at=started_at
+        )
+        return
+
     if account_uses_snowluma_docker(
         account
     ) and protocol_manager._linux_docker_container_running_sync(account):
@@ -313,6 +340,17 @@ async def handle_relogin_session(
             return
 
         if protocol_manager.has_account(qq):
+            account = protocol_manager.get_account(qq) or {}
+            from pallas_plugin_protocol.snowluma_qr_capture import (
+                account_uses_snowluma_docker,
+            )
+
+            if account_uses_snowluma_docker(account):
+                session.step = "await_risk_device"
+                append_text(result, "是否提示“风险/外挂设备”？（是/否）")
+                result.session_active = True
+                _sessions[key] = session
+                return
             session.step = "execute"
         elif not await bot_id_exists_in_db(int(qq)):
             append_text(result, f"数据库中不存在账号为：{qq} 的牛牛")
@@ -346,9 +384,25 @@ async def handle_relogin_session(
             return
         session.step = "execute"
 
+    if session.step == "await_risk_device":
+        if plain in _CANCEL_WORDS:
+            append_text(result, "已取消重新上号。")
+            return
+        reset_login_state = parse_risk_device_answer(plain)
+        if reset_login_state is None:
+            result.reject_hint = "请回复 是 或 否："
+            result.session_active = True
+            return
+        session.data["reset_login_state"] = reset_login_state
+        session.step = "execute"
+
     if session.step == "execute":
         qq = str(session.data.get("qq", ""))
-        await run_relogin_restart(qq, result)
+        await run_relogin_restart(
+            qq,
+            result,
+            reset_login_state=bool(session.data.get("reset_login_state")),
+        )
 
 
 async def handle_create_session(
