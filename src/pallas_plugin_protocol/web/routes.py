@@ -8,12 +8,14 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import quote, urlparse, urlunparse
 
 import httpx
-from fastapi import FastAPI, Header, HTTPException, Query, Request
+from fastapi import FastAPI, Header, HTTPException, Query, Request, WebSocket
 from fastapi.responses import (
     FileResponse,
     RedirectResponse,
+    Response,
     StreamingResponse,
 )
+from starlette.background import BackgroundTask
 
 if TYPE_CHECKING:
     from ..config import Config
@@ -124,6 +126,173 @@ def register_pallas_protocol_routes(
                 detail="统一控制台鉴权未初始化，请检查 data/pallas_console/",
             )
         raise HTTPException(status_code=401, detail="未登录或会话已失效，请重新登录")
+
+    async def _proxy_instance_http(
+        request: Request,
+        account_id: str,
+        surface: str,
+        subpath: str,
+    ) -> StreamingResponse:
+        from ..instance_web_proxy import resolve_instance_proxy_target
+
+        _auth(None, None, request=request)
+        account = await asyncio.to_thread(manager.get_account, account_id, brief=True)
+        if account is None:
+            raise HTTPException(status_code=404, detail="协议账号不存在")
+        if not account.get("running"):
+            raise HTTPException(status_code=503, detail="协议实例未运行")
+        try:
+            target = resolve_instance_proxy_target(
+                account,
+                surface=surface,  # type: ignore[arg-type]
+                config=getattr(manager, "_config", plugin_config),
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+
+        path = target.base_path.rstrip("/") + "/" + subpath.lstrip("/")
+        url = f"{target.origin}{path}"
+        if request.url.query:
+            url = f"{url}?{request.url.query}"
+        headers = {
+            key: value
+            for key, value in request.headers.items()
+            if key.lower() not in {"host", "connection", "content-length"}
+        }
+        client = httpx.AsyncClient(follow_redirects=False, timeout=None)
+        upstream = await client.send(
+            client.build_request(
+                request.method,
+                url,
+                headers=headers,
+                content=await request.body(),
+            ),
+            stream=True,
+        )
+
+        async def close_upstream() -> None:
+            await upstream.aclose()
+            await client.aclose()
+
+        response_headers = {
+            key: value
+            for key, value in upstream.headers.items()
+            if key.lower() not in {"connection", "transfer-encoding"}
+        }
+        content_type = upstream.headers.get("content-type", "").lower()
+        if "text/html" in content_type:
+            body = (await upstream.aread()).decode("utf-8", errors="replace")
+            proxy_base = f"{console_base}/protocol/instances/{account_id}/{surface}/"
+            body = body.replace('src="/', f'src="{proxy_base}').replace(
+                'href="/', f'href="{proxy_base}'
+            )
+            response_headers.pop("content-length", None)
+            await close_upstream()
+            return Response(
+                content=body,
+                status_code=upstream.status_code,
+                headers=response_headers,
+                media_type="text/html",
+            )
+        return StreamingResponse(
+            upstream.aiter_raw(),
+            status_code=upstream.status_code,
+            headers=response_headers,
+            background=BackgroundTask(close_upstream),
+        )
+
+    console_base = _pallas_console_http_base()
+
+    @app.api_route(
+        f"{console_base}/protocol/instances/{{account_id}}/{{surface}}/{{subpath:path}}",
+        methods=["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        include_in_schema=False,
+    )
+    async def proxy_instance_http(
+        request: Request,
+        account_id: str,
+        surface: str,
+        subpath: str,
+    ) -> StreamingResponse:
+        return await _proxy_instance_http(request, account_id, surface, subpath)
+
+    @app.websocket(
+        f"{console_base}/protocol/instances/{{account_id}}/{{surface}}/{{subpath:path}}"
+    )
+    async def proxy_instance_websocket(
+        websocket: WebSocket,
+        account_id: str,
+        surface: str,
+        subpath: str,
+    ) -> None:
+        from pallas.console.webui.console_login import extract_session_from_request
+
+        if not extract_session_from_request(
+            cookies=dict(websocket.cookies),
+            header_token=websocket.headers.get("X-Pallas-Protocol-Token"),
+            query_token=websocket.query_params.get("token"),
+        ):
+            await websocket.close(code=4401)
+            return
+
+        from ..instance_web_proxy import resolve_instance_proxy_target
+
+        account = await asyncio.to_thread(manager.get_account, account_id, brief=True)
+        if account is None or not account.get("running"):
+            await websocket.close(code=1013)
+            return
+        try:
+            target = resolve_instance_proxy_target(
+                account,
+                surface=surface,  # type: ignore[arg-type]
+                config=getattr(manager, "_config", plugin_config),
+            )
+        except ValueError:
+            await websocket.close(code=1008)
+            return
+
+        import contextlib
+        import websockets
+
+        path = target.base_path.rstrip("/") + "/" + subpath.lstrip("/")
+        upstream_url = f"ws://127.0.0.1:{target.origin.rsplit(':', 1)[1]}{path}"
+        if websocket.url.query:
+            upstream_url = f"{upstream_url}?{websocket.url.query}"
+        try:
+            async with websockets.connect(upstream_url, proxy=None) as upstream:
+                await websocket.accept()
+
+                async def browser_to_upstream() -> None:
+                    while True:
+                        message = await websocket.receive()
+                        if message["type"] == "websocket.disconnect":
+                            return
+                        if message.get("bytes") is not None:
+                            await upstream.send(message["bytes"])
+                        elif message.get("text") is not None:
+                            await upstream.send(message["text"])
+
+                async def upstream_to_browser() -> None:
+                    async for message in upstream:
+                        if isinstance(message, bytes):
+                            await websocket.send_bytes(message)
+                        else:
+                            await websocket.send_text(message)
+
+                first, second = await asyncio.wait(
+                    [
+                        asyncio.create_task(browser_to_upstream()),
+                        asyncio.create_task(upstream_to_browser()),
+                    ],
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                for task in second:
+                    task.cancel()
+                for task in first | second:
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await task
+        except OSError:
+            await websocket.close(code=1011)
 
     def _redirect_legacy_protocol_page(
         request: Request,
