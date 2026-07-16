@@ -35,11 +35,12 @@ class ProxyManager:
 
     def get_account(self, account_id: str, *, brief: bool = False) -> dict | None:
         _ = brief
-        if account_id != "napcat-1":
+        if account_id != "snowluma-1":
             return None
         return {
-            "protocol_backend": "napcat",
-            "webui_port": self.port,
+            "protocol_backend": "snowluma",
+            "snowluma_linux_docker": True,
+            "snowluma_docker_host_novnc_port": self.port,
             "running": True,
         }
 
@@ -93,7 +94,7 @@ def test_legacy_protocol_login_is_not_an_independent_html_page() -> None:
     assert response.headers["location"] == "/pallas/protocol"
 
 
-def test_console_instance_webui_proxies_the_registered_subpath(monkeypatch) -> None:
+def test_console_instance_novnc_proxies_the_registered_subpath(monkeypatch) -> None:
     monkeypatch.setattr(
         "pallas.console.webui.console_login.extract_session_from_request",
         lambda **_kwargs: "session",
@@ -113,14 +114,14 @@ def test_console_instance_webui_proxies_the_registered_subpath(monkeypatch) -> N
     )
     try:
         response = TestClient(app).get(
-            "/pallas/protocol/instances/napcat-1/webui/assets/app.js"
+            "/pallas/protocol/instances/snowluma-1/novnc/assets/app.js"
         )
     finally:
         server.shutdown()
         thread.join()
 
     assert response.status_code == 200
-    assert response.text == "upstream:/webui/assets/app.js"
+    assert response.text == "upstream:/assets/app.js"
 
 
 def test_console_registers_an_instance_websocket_proxy_route() -> None:

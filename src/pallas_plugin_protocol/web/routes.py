@@ -12,7 +12,6 @@ from fastapi import FastAPI, Header, HTTPException, Query, Request, WebSocket
 from fastapi.responses import (
     FileResponse,
     RedirectResponse,
-    Response,
     StreamingResponse,
 )
 from starlette.background import BackgroundTask
@@ -179,21 +178,6 @@ def register_pallas_protocol_routes(
             for key, value in upstream.headers.items()
             if key.lower() not in {"connection", "transfer-encoding"}
         }
-        content_type = upstream.headers.get("content-type", "").lower()
-        if "text/html" in content_type:
-            body = (await upstream.aread()).decode("utf-8", errors="replace")
-            proxy_base = f"{console_base}/protocol/instances/{account_id}/{surface}/"
-            body = body.replace('src="/', f'src="{proxy_base}').replace(
-                'href="/', f'href="{proxy_base}'
-            )
-            response_headers.pop("content-length", None)
-            await close_upstream()
-            return Response(
-                content=body,
-                status_code=upstream.status_code,
-                headers=response_headers,
-                media_type="text/html",
-            )
         return StreamingResponse(
             upstream.aiter_raw(),
             status_code=upstream.status_code,

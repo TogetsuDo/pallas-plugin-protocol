@@ -8,20 +8,6 @@ nonebot.init()
 from pallas_plugin_protocol.instance_web_proxy import resolve_instance_proxy_target  # noqa: E402
 
 
-def test_resolve_webui_targets_the_registered_loopback_port() -> None:
-    target = resolve_instance_proxy_target(
-        {
-            "protocol_backend": "napcat",
-            "webui_port": 16099,
-        },
-        surface="webui",
-        config=SimpleNamespace(),
-    )
-
-    assert target.origin == "http://127.0.0.1:16099"
-    assert target.base_path == "/webui/"
-
-
 def test_resolve_snowluma_novnc_requires_the_registered_docker_port() -> None:
     target = resolve_instance_proxy_target(
         {

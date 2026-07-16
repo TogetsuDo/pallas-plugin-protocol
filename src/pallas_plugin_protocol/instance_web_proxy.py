@@ -5,9 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from .contract import DEFAULT_PROTOCOL_BACKEND, SNOWLUMA_PROTOCOL_BACKEND
+from .contract import SNOWLUMA_PROTOCOL_BACKEND
 
-InstanceWebSurface = Literal["webui", "novnc"]
+InstanceWebSurface = Literal["novnc"]
 
 
 @dataclass(frozen=True)
@@ -23,15 +23,9 @@ def resolve_instance_proxy_target(
     config: Any,
 ) -> InstanceProxyTarget:
     """仅从账号登记端口解析可反代的环回目标。"""
-    backend = (
-        str(account.get("protocol_backend") or DEFAULT_PROTOCOL_BACKEND).strip().lower()
-    )
-    if surface == "webui":
-        port = resolve_instance_proxy_port(account.get("webui_port"), label="WebUI")
-        base_path = "/" if backend == SNOWLUMA_PROTOCOL_BACKEND else "/webui/"
-        return InstanceProxyTarget(
-            origin=f"http://127.0.0.1:{port}", base_path=base_path
-        )
+    if surface != "novnc":
+        raise ValueError("原生 WebUI 不支持通过控制台反代")
+    backend = str(account.get("protocol_backend") or "").strip().lower()
 
     if backend != SNOWLUMA_PROTOCOL_BACKEND:
         raise ValueError("noVNC 仅支持 SnowLuma 协议实例")
