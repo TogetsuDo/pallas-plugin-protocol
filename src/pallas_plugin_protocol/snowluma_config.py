@@ -80,6 +80,7 @@ def merge_snowluma_docker_snapshot_ws_clients(
     """将 wsClients 写入 SnowLuma Docker 使用的 snapshot 格式 onebot 配置。"""
     out = dict(data) if isinstance(data, dict) else {}
     out.setdefault("mode", "snapshot")
+    out.setdefault("statusCommand", {"enabled": False})
     networks = out.get("networks")
     if not isinstance(networks, dict):
         networks = {}
@@ -190,6 +191,7 @@ def sync_snowluma_onebot(
     config_dir.mkdir(parents=True, exist_ok=True)
     path = snowluma_onebot_path(config_dir, qq)
     data = cfg.safe_read_json(path)
+    data.setdefault("statusCommand", {"enabled": False})
     data.setdefault(
         "httpServers",
         [{"host": "127.0.0.1", "port": 3000, "path": "/", "accessToken": ""}],

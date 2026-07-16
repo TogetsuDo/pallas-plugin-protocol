@@ -57,6 +57,40 @@ def test_merge_snowluma_docker_snapshot_ws_clients() -> None:
     clients = merged["networks"]["wsClients"]
     assert clients[0]["url"] == "ws://172.17.0.1:7973/onebot/v11/ws"
     assert any(c.get("name") == "other" for c in clients)
+    assert merged["statusCommand"] == {"enabled": False}
+
+
+def test_sync_snowluma_onebot_disables_status_command_by_default(
+    tmp_path: Path,
+) -> None:
+    account = {
+        "qq": "3879348674",
+        "account_data_dir": str(tmp_path),
+        "ws_url": "ws://127.0.0.1:7973/onebot/v11/ws",
+    }
+
+    snowluma_config.sync_snowluma_onebot(FakeCfg(), account, lambda acc: str(acc["qq"]))
+
+    data = json.loads(
+        (tmp_path / "config" / "onebot_3879348674.json").read_text(encoding="utf-8")
+    )
+    assert data["statusCommand"] == {"enabled": False}
+
+
+def test_sync_snowluma_onebot_preserves_existing_status_command(tmp_path: Path) -> None:
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    path = config_dir / "onebot_3879348674.json"
+    path.write_text(
+        json.dumps({"statusCommand": {"enabled": True, "trigger": "/status"}}),
+        encoding="utf-8",
+    )
+    account = {"qq": "3879348674", "account_data_dir": str(tmp_path)}
+
+    snowluma_config.sync_snowluma_onebot(FakeCfg(), account, lambda acc: str(acc["qq"]))
+
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert data["statusCommand"] == {"enabled": True, "trigger": "/status"}
 
 
 def test_sync_snowluma_onebot_docker_snapshot_writes_file(tmp_path: Path) -> None:
