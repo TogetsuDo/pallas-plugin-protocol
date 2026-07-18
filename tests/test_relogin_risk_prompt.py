@@ -31,6 +31,10 @@ config = types.ModuleType("pallas.api.config")
 config.user_is_bot_admin = None
 sys.modules.setdefault("pallas.api.config", config)
 
+presence_api = types.ModuleType("pallas.api.presence")
+presence_api.bot_has_cluster_connection = lambda _qq: False
+sys.modules.setdefault("pallas.api.presence", presence_api)
+
 db = types.ModuleType("pallas.core.foundation.db")
 db.make_bot_config_repository = lambda: None
 sys.modules.setdefault("pallas.core.foundation.db", db)
@@ -101,3 +105,18 @@ def test_existing_snowluma_account_waits_for_risk_answer(monkeypatch) -> None:
     assert [item.content for item in result.replies] == [
         "是否提示“风险/外挂设备”？（是/否）"
     ]
+
+
+def test_relogin_skips_recovery_when_bot_is_already_connected(monkeypatch) -> None:
+    protocol = types.ModuleType("pallas_plugin_protocol")
+    protocol.manager = types.SimpleNamespace(
+        get_account=lambda _qq: {"account_data_dir": "/tmp/account"},
+    )
+    sys.modules["pallas_plugin_protocol"] = protocol
+    monkeypatch.setattr(service, "bot_has_cluster_connection", lambda _qq: True, raising=False)
+
+    result = ReloginHandleResult()
+
+    asyncio.run(service.run_relogin_restart("123456", result))
+
+    assert [item.content for item in result.replies] == ["牛牛已在线，无需重新上号。"]

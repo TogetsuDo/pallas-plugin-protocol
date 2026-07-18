@@ -12,6 +12,7 @@ from typing import Any, Literal
 from nonebot import get_driver
 
 from pallas.api.config import user_is_bot_admin
+from pallas.api.presence import bot_has_cluster_connection
 from pallas.core.foundation.db import make_bot_config_repository
 from pallas.core.platform.shard.coord.relogin_payload import (
     ReloginHandleResult,
@@ -193,6 +194,10 @@ async def run_relogin_restart(
     reset_login_state: bool = False,
 ) -> None:
     from pallas_plugin_protocol import manager as protocol_manager
+
+    if not reset_login_state and bot_has_cluster_connection(int(qq)):
+        append_text(result, "牛牛已在线，无需重新上号。")
+        return
 
     account = protocol_manager.get_account(qq) or {}
     account_data_dir = Path(str(account.get("account_data_dir", "")).strip())

@@ -14,6 +14,7 @@ import pytest
 from PIL import Image
 
 _ROOT = Path(__file__).resolve().parents[1] / "src" / "pallas_plugin_protocol"
+_PKG = "pallas_plugin_protocol_qr_capture_test"
 
 
 def load_module(qualified: str, filename: str):
@@ -26,21 +27,21 @@ def load_module(qualified: str, filename: str):
     return mod
 
 
-if "pallas_plugin_protocol" not in sys.modules:
-    pkg = types.ModuleType("pallas_plugin_protocol")
+if _PKG not in sys.modules:
+    pkg = types.ModuleType(_PKG)
     pkg.__path__ = [str(_ROOT)]
-    sys.modules["pallas_plugin_protocol"] = pkg
+    sys.modules[_PKG] = pkg
 
-load_module("pallas_plugin_protocol.contract", "contract.py")
+load_module(f"{_PKG}.contract", "contract.py")
 
-snowluma_docker_stub = types.ModuleType("pallas_plugin_protocol.snowluma_docker")
+snowluma_docker_stub = types.ModuleType(f"{_PKG}.snowluma_docker")
 snowluma_docker_stub.snowluma_docker_container_name = lambda account: (
     f"pallas-proto-sl-{account.get('id', 'x')}"
 )
-sys.modules["pallas_plugin_protocol.snowluma_docker"] = snowluma_docker_stub
+sys.modules[f"{_PKG}.snowluma_docker"] = snowluma_docker_stub
 
 qr_capture = load_module(
-    "pallas_plugin_protocol.snowluma_qr_capture", "snowluma_qr_capture.py"
+    f"{_PKG}.snowluma_qr_capture", "snowluma_qr_capture.py"
 )
 account_uses_snowluma_docker = qr_capture.account_uses_snowluma_docker
 capture_snowluma_qrcode_once = qr_capture.capture_snowluma_qrcode_once
