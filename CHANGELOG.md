@@ -5,6 +5,12 @@
 
 ## [Unreleased]
 
+## [4.0.38] - 2026-07-22
+
+- feat(runtime): 支持按账号切换 NapCat / SnowLuma 运行时、NapCat Docker 镜像，以及新建或挂载已有 SnowLuma Runtime；切换失败自动回滚。
+- fix(web): Bot WebUI 的协议接口请求改用真实控制台 API 基址，账号保存不再落入 SPA 回退页。
+- fix(runtime): NapCat 缺少 bypass 配置时默认六项全开；账号运行时展示优先使用实际 Docker 镜像。
+
 ## [4.0.37] - 2026-07-22
 
 - feat(snowluma): 显式 SnowLuma Runtime，支持一个进程/容器挂多个 QQ（Shell + Docker）；启停 QQ 与启停 Runtime 分层；旧账号自动迁移为单 QQ Runtime。
