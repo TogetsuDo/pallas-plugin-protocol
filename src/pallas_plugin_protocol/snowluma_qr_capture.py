@@ -13,7 +13,10 @@ from pathlib import Path
 from typing import Any
 
 from .contract import ACCOUNT_PROTOCOL_BACKEND_KEY, SNOWLUMA_PROTOCOL_BACKEND
-from .snowluma_docker import snowluma_docker_container_name
+from .snowluma_docker import (
+    snowluma_docker_container_name,
+    snowluma_docker_container_name_for_runtime,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +60,27 @@ OCR_UNAVAILABLE_SENTINEL = "__PALLAS_OCR_UNAVAILABLE__"
 
 def account_qrcode_cache_path(account_data_dir: Path) -> Path:
     return account_data_dir / "cache" / "qrcode.png"
+
+
+def account_qrcode_cache_path_for_qq(account_data_dir: Path, qq: str) -> Path:
+    uin = str(qq or "").strip()
+    if uin.isdigit():
+        return account_data_dir / "cache" / f"qrcode_{uin}.png"
+    return account_qrcode_cache_path(account_data_dir)
+
+
+def resolve_snowluma_docker_container_name(account: dict) -> str:
+    rid = str(account.get("snowluma_runtime_id") or "").strip()
+    if rid:
+        return snowluma_docker_container_name_for_runtime(
+            {
+                "id": rid,
+                "legacy_container_account_id": str(
+                    account.get("snowluma_runtime_legacy_container_account_id") or ""
+                ).strip(),
+            }
+        )
+    return snowluma_docker_container_name(account)
 
 
 def account_uses_snowluma_docker(account: dict) -> bool:
@@ -474,7 +498,7 @@ def ensure_qq_auto_login_checked(
     """定位 QQ 登录窗，确认「自动登录」勾选状态后按需点击。"""
     if not account_uses_snowluma_docker(account):
         return False
-    container = snowluma_docker_container_name(account)
+    container = resolve_snowluma_docker_container_name(account)
     display = snowluma_qr_capture_display(config)
     login = locate_qq_login_window(
         container,
@@ -525,7 +549,7 @@ def attempt_snowluma_quick_login(
     """已登录过账号的常见界面：点头像下的蓝色「登录」，而非截二维码。"""
     if not account_uses_snowluma_docker(account):
         return False
-    container = snowluma_docker_container_name(account)
+    container = resolve_snowluma_docker_container_name(account)
     display = snowluma_qr_capture_display(config)
     exec_runner = run_exec or _docker_exec
     login = locate_qq_login_window(
@@ -737,7 +761,7 @@ def capture_snowluma_qrcode_once(
     if not account_data_dir:
         return None
 
-    container = snowluma_docker_container_name(account)
+    container = resolve_snowluma_docker_container_name(account)
     display = snowluma_qr_capture_display(config)
     exec_runner = run_exec or _docker_exec
     text_runner = run_exec_text or _docker_exec_text

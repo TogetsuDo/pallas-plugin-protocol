@@ -1,0 +1,367 @@
+"""SnowLuma Runtime 编排：挂到 PallasProtocolService 的 mixin。"""
+
+from __future__ import annotations
+
+import asyncio
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+from .contract import (
+    SNOWLUMA_RUNTIME_ID_KEY,
+)
+from .snowluma_runtime_registry import (
+    SnowLumaRuntimeRegistry,
+)
+
+if TYPE_CHECKING:
+    from .service import NapCatRuntime, PallasProtocolService
+
+
+def snowluma_process_track_key(runtime_id: str) -> str:
+    return f"slrt:{str(runtime_id or '').strip()}"
+
+
+class SnowLumaRuntimeOpsMixin:
+    """由 PallasProtocolService 继承；依赖 self._accounts / self._runtimes 等。"""
+
+    _sl_runtime_registry: SnowLumaRuntimeRegistry
+
+    def _init_snowluma_runtime_registry(self: PallasProtocolService) -> None:
+        self._sl_runtime_registry = SnowLumaRuntimeRegistry(
+            self._data_dir, self._instances_root
+        )
+        self._sl_runtime_registry.load()
+
+    def _migrate_snowluma_runtimes_on_load(self: PallasProtocolService) -> None:
+        if self._sl_runtime_registry.migrate_legacy_accounts(self._accounts):
+            self._save_accounts()
+
+    def snowluma_runtime_members(
+        self: PallasProtocolService, runtime_id: str
+    ) -> list[str]:
+        rid = str(runtime_id or "").strip()
+        out: list[str] = []
+        for aid, acc in self._accounts.items():
+            if str(acc.get(SNOWLUMA_RUNTIME_ID_KEY, "") or "").strip() == rid:
+                out.append(aid)
+        return out
+
+    def resolve_snowluma_runtime(
+        self: PallasProtocolService, account: dict
+    ) -> dict | None:
+        rid = str(account.get(SNOWLUMA_RUNTIME_ID_KEY, "") or "").strip()
+        if not rid:
+            return None
+        return self._sl_runtime_registry.get(rid)
+
+    def bind_account_to_snowluma_runtime(
+        self: PallasProtocolService, account: dict, runtime: dict
+    ) -> None:
+        account[SNOWLUMA_RUNTIME_ID_KEY] = runtime["id"]
+        account["account_data_dir"] = str(runtime.get("data_dir") or "")
+        if runtime.get("webui_port") is not None:
+            account["webui_port"] = runtime["webui_port"]
+        legacy = str(runtime.get("legacy_container_account_id", "") or "").strip()
+        if legacy:
+            account["snowluma_runtime_legacy_container_account_id"] = legacy
+        else:
+            account.pop("snowluma_runtime_legacy_container_account_id", None)
+        for key in (
+            "snowluma_docker_host_onebot_http",
+            "snowluma_docker_host_onebot_ws",
+            "snowluma_docker_host_novnc_port",
+            "snowluma_docker_host_vnc_port",
+            "snowluma_managed_webui_password",
+            "program_dir",
+        ):
+            if key in runtime and runtime[key] is not None:
+                account[key] = runtime[key]
+
+    def sync_runtime_ports_from_account(
+        self: PallasProtocolService, account: dict
+    ) -> None:
+        runtime = self.resolve_snowluma_runtime(account)
+        if not runtime:
+            return
+        patch: dict[str, Any] = {}
+        for key in (
+            "webui_port",
+            "snowluma_docker_host_onebot_http",
+            "snowluma_docker_host_onebot_ws",
+            "snowluma_docker_host_novnc_port",
+            "snowluma_docker_host_vnc_port",
+            "snowluma_managed_webui_password",
+        ):
+            if key in account and account[key] is not None:
+                patch[key] = account[key]
+        if patch:
+            self._sl_runtime_registry.update(runtime["id"], patch)
+
+    def _snowluma_proc_runtime(
+        self: PallasProtocolService, runtime_id: str
+    ) -> NapCatRuntime:
+        key = snowluma_process_track_key(runtime_id)
+        return self._runtime(key)
+
+    def list_snowluma_runtimes(self: PallasProtocolService) -> list[dict]:
+        out: list[dict] = []
+        for item in self._sl_runtime_registry.list_runtimes():
+            out.append(self._compose_snowluma_runtime_state(item))
+        return out
+
+    def get_snowluma_runtime(
+        self: PallasProtocolService, runtime_id: str
+    ) -> dict | None:
+        item = self._sl_runtime_registry.get(runtime_id)
+        if not item:
+            return None
+        return self._compose_snowluma_runtime_state(item)
+
+    def _compose_snowluma_runtime_state(
+        self: PallasProtocolService, runtime: dict
+    ) -> dict:
+        rid = str(runtime.get("id", ""))
+        members = self.snowluma_runtime_members(rid)
+        process_running = self._snowluma_runtime_process_running(runtime)
+        return {
+            **runtime,
+            "member_account_ids": members,
+            "member_count": len(members),
+            "process_running": process_running,
+        }
+
+    def _snowluma_runtime_process_running(
+        self: PallasProtocolService, runtime: dict
+    ) -> bool:
+        from .snowluma_docker import (
+            snowluma_docker_container_name_for_runtime,
+            snowluma_docker_container_running_sync,
+        )
+
+        profile = self.runtime_profile()
+        mode = str(profile.get("snowluma_runtime_mode") or "").strip().lower()
+        if mode == "docker" or any(
+            bool((self._accounts.get(aid) or {}).get("snowluma_linux_docker"))
+            for aid in self.snowluma_runtime_members(str(runtime.get("id", "")))
+        ):
+            name = snowluma_docker_container_name_for_runtime(runtime)
+            return snowluma_docker_container_running_sync(name)
+        track = self._runtimes.get(
+            snowluma_process_track_key(str(runtime.get("id", "")))
+        )
+        return bool(track and track.process and track.process.returncode is None)
+
+    def create_snowluma_runtime(self: PallasProtocolService, payload: dict) -> dict:
+        if "webui_port" not in payload or payload.get("webui_port") in (None, ""):
+            payload = {**payload, "webui_port": self._next_free_webui_port()}
+        item = self._sl_runtime_registry.create(payload)
+        return self._compose_snowluma_runtime_state(item)
+
+    def update_snowluma_runtime(
+        self: PallasProtocolService, runtime_id: str, payload: dict
+    ) -> dict:
+        item = self._sl_runtime_registry.update(runtime_id, payload)
+        for aid in self.snowluma_runtime_members(runtime_id):
+            acc = self._accounts.get(aid)
+            if acc:
+                self.bind_account_to_snowluma_runtime(acc, item)
+        self._save_accounts()
+        return self._compose_snowluma_runtime_state(item)
+
+    async def delete_snowluma_runtime(
+        self: PallasProtocolService, runtime_id: str, *, force: bool = False
+    ) -> None:
+        members = self.snowluma_runtime_members(runtime_id)
+        if members and not force:
+            raise ValueError(
+                f"Runtime 仍有 {len(members)} 个账号，请先删除账号或传 force=true"
+            )
+        runtime = self._sl_runtime_registry.get(runtime_id)
+        if not runtime:
+            raise KeyError("Runtime 不存在")
+        await self.stop_snowluma_runtime(runtime_id)
+        from .snowluma_docker import (
+            snowluma_docker_container_name_for_runtime,
+            snowluma_docker_remove_force,
+        )
+
+        try:
+            await snowluma_docker_remove_force(
+                snowluma_docker_container_name_for_runtime(runtime)
+            )
+        except Exception:
+            pass
+        for aid in list(members):
+            try:
+                await self.delete_account(aid)
+            except Exception:
+                self._accounts.pop(aid, None)
+        data_dir = Path(str(runtime.get("data_dir", "") or "").strip())
+        self._sl_runtime_registry.delete(runtime_id)
+        self._runtimes.pop(snowluma_process_track_key(runtime_id), None)
+        if data_dir.is_dir():
+            try:
+                import shutil
+
+                resolved = data_dir.resolve()
+                root = self._instances_root.resolve()
+                if resolved == root or root in resolved.parents:
+                    shutil.rmtree(resolved, ignore_errors=True)
+            except OSError:
+                pass
+        self._save_accounts()
+
+    async def start_snowluma_runtime(
+        self: PallasProtocolService, runtime_id: str
+    ) -> dict:
+        runtime = self._sl_runtime_registry.get(runtime_id)
+        if not runtime:
+            raise KeyError("Runtime 不存在")
+        members = self.snowluma_runtime_members(runtime_id)
+        if not members:
+            raise ValueError("Runtime 没有挂载账号，无法启动")
+        seed_id = members[0]
+        seed = self._accounts[seed_id]
+        self.bind_account_to_snowluma_runtime(seed, runtime)
+        await self.start_account(seed_id)
+        for aid in members[1:]:
+            acc = self._accounts.get(aid)
+            if not acc or not acc.get("enabled", True):
+                continue
+            be = self._protocol_runtime_backend(acc)
+            self.bind_account_to_snowluma_runtime(acc, runtime)
+            be.apply_defaults(acc, self._resolve_qq)
+            be.prepare_dirs(acc)
+            be.sync_all_configs(acc, self._resolve_qq)
+            try:
+                await self.snowluma_inject_hook_via_webui(aid)
+            except Exception:
+                pass
+            self.schedule_snowluma_auto_quick_login(aid)
+        self._save_accounts()
+        return self.get_snowluma_runtime(runtime_id) or {}
+
+    async def stop_snowluma_runtime(
+        self: PallasProtocolService, runtime_id: str
+    ) -> dict | None:
+        runtime = self._sl_runtime_registry.get(runtime_id)
+        if not runtime:
+            return None
+        members = self.snowluma_runtime_members(runtime_id)
+        seed = self._accounts.get(members[0]) if members else None
+        track_key = snowluma_process_track_key(runtime_id)
+        track = self._runtimes.get(track_key)
+
+        use_docker = bool(seed and seed.get("snowluma_linux_docker"))
+        if use_docker and seed:
+            from .snowluma_docker import (
+                snowluma_docker_container_name_for_runtime,
+                snowluma_docker_stop,
+            )
+
+            name = snowluma_docker_container_name_for_runtime(runtime)
+            for aid in members:
+                pending = self._snowluma_auto_login_tasks.pop(aid, None)
+                if pending is not None and not pending.done():
+                    pending.cancel()
+            proc_rt = track or self._runtime(track_key)
+            async with proc_rt.lock:
+                if proc_rt.drain_task and not proc_rt.drain_task.done():
+                    proc_rt.drain_task.cancel()
+                proc = proc_rt.process
+                if proc and proc.returncode is None:
+                    try:
+                        proc.kill()
+                    except ProcessLookupError:
+                        pass
+                    try:
+                        await proc.wait()
+                    except Exception:
+                        pass
+                proc_rt.process = None
+                await snowluma_docker_stop(name)
+                proc_rt.docker_container_name = None
+        elif track:
+            async with track.lock:
+                proc = track.process
+                if proc and proc.returncode is None:
+                    if proc.pid:
+                        await asyncio.to_thread(
+                            self._launch.kill_process_tree, proc.pid
+                        )
+                    else:
+                        proc.terminate()
+                    try:
+                        await asyncio.wait_for(proc.wait(), timeout=12)
+                    except TimeoutError:
+                        proc.kill()
+                        await proc.wait()
+                if track.drain_task and not track.drain_task.done():
+                    track.drain_task.cancel()
+                track.process = None
+        return self.get_snowluma_runtime(runtime_id)
+
+    def ensure_account_snowluma_runtime(
+        self: PallasProtocolService, account: dict, payload: dict | None = None
+    ) -> dict:
+        """创建账号时解析或新建 Runtime，并把账号绑上去。"""
+        payload = payload or {}
+        rid = str(
+            payload.get(SNOWLUMA_RUNTIME_ID_KEY)
+            or account.get(SNOWLUMA_RUNTIME_ID_KEY)
+            or ""
+        ).strip()
+        if rid:
+            runtime = self._sl_runtime_registry.get(rid)
+            if not runtime:
+                raise ValueError(f"SnowLuma Runtime 不存在: {rid}")
+            self.bind_account_to_snowluma_runtime(account, runtime)
+            return runtime
+        if bool(payload.get("create_runtime", True)):
+            rt_payload: dict[str, Any] = {
+                "display_name": str(
+                    payload.get("runtime_display_name")
+                    or account.get("display_name")
+                    or account.get("id")
+                    or "SnowLuma"
+                ).strip(),
+            }
+            if str(payload.get("account_data_dir", "") or "").strip():
+                rt_payload["data_dir"] = str(payload["account_data_dir"]).strip()
+            if payload.get("webui_port") is not None:
+                rt_payload["webui_port"] = payload["webui_port"]
+            runtime = self._sl_runtime_registry.create(
+                {
+                    **rt_payload,
+                    "webui_port": rt_payload.get("webui_port")
+                    or self._next_free_webui_port(),
+                }
+            )
+            self.bind_account_to_snowluma_runtime(account, runtime)
+            return runtime
+        raise ValueError("SnowLuma 账号需要 snowluma_runtime_id 或 create_runtime")
+
+    def account_shares_snowluma_runtime(
+        self: PallasProtocolService, account: dict
+    ) -> bool:
+        rid = str(account.get(SNOWLUMA_RUNTIME_ID_KEY, "") or "").strip()
+        if not rid:
+            return False
+        return len(self.snowluma_runtime_members(rid)) > 1
+
+    def linux_docker_container_name_for_account(
+        self: PallasProtocolService, account: dict
+    ) -> str:
+        if account.get("snowluma_linux_docker"):
+            from .snowluma_docker import (
+                snowluma_docker_container_name,
+                snowluma_docker_container_name_for_runtime,
+            )
+
+            runtime = self.resolve_snowluma_runtime(account)
+            if runtime:
+                return snowluma_docker_container_name_for_runtime(runtime)
+            return snowluma_docker_container_name(account)
+        from .linux_docker import docker_container_name
+
+        return docker_container_name(account)

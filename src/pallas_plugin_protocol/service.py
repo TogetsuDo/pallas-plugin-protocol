@@ -43,6 +43,7 @@ from .contract import (
     DEFAULT_PROTOCOL_BACKEND,
     MANAGED_RUNTIME_TAG_KEY,
     SNOWLUMA_PROTOCOL_BACKEND,
+    SNOWLUMA_RUNTIME_ID_KEY,
 )
 from .docker_cli import (
     docker_repository_from_ref,
@@ -79,6 +80,7 @@ from .snowluma_webui_client import (
 )
 from .snowluma_health import assess_snowluma_account_health, is_snowluma_account
 from .snowluma_host_deps import log_snowluma_host_deps_once
+from .snowluma_runtime_ops import SnowLumaRuntimeOpsMixin
 
 _LINUX_RT_MODES = frozenset({"docker", "appimage", "shell"})
 
@@ -104,7 +106,7 @@ class NapCatRuntime:
     docker_container_name: str | None = None
 
 
-class PallasProtocolService:
+class PallasProtocolService(SnowLumaRuntimeOpsMixin):
     def __init__(self, data_dir: Path, config: Config) -> None:
         self._data_dir = data_dir
         self._resource_root = resource_dir()
@@ -116,6 +118,7 @@ class PallasProtocolService:
         self._runtime_store = NapCatRuntimeStore(data_dir, config)
         self._snowluma_store = SnowLumaRuntimeStore(data_dir, config)
         self._runtime_profile_path = self._data_dir / "runtime_profile.json"
+        self._init_snowluma_runtime_registry()
         self._launch = LaunchManager(
             self._data_dir,
             self._resource_root,
@@ -1256,11 +1259,22 @@ class PallasProtocolService:
                 account, self._config, self._resolve_qq
             )
         elif account.get("snowluma_linux_docker"):
-            from .snowluma_docker import build_snowluma_docker_run_argv
-
-            account["args"] = build_snowluma_docker_run_argv(
-                account, self._config, self._resolve_qq
+            from .snowluma_docker import (
+                build_snowluma_docker_run_argv,
+                build_snowluma_docker_run_argv_for_runtime,
             )
+
+            sl_runtime = self.resolve_snowluma_runtime(account)
+            if sl_runtime:
+                account["args"] = build_snowluma_docker_run_argv_for_runtime(
+                    sl_runtime,
+                    self._config,
+                    account_id_label=str(account.get("id", "")),
+                )
+            else:
+                account["args"] = build_snowluma_docker_run_argv(
+                    account, self._config, self._resolve_qq
+                )
 
     def _migrate_account_webui_fields(self, account_id: str, account: dict) -> bool:
         changed = False
@@ -1289,6 +1303,7 @@ class PallasProtocolService:
     def _load_accounts(self) -> None:
         if not self._accounts_file.exists():
             self._accounts = {}
+            self._migrate_snowluma_runtimes_on_load()
             return
         try:
             self._accounts = json.loads(self._accounts_file.read_text(encoding="utf-8"))
@@ -1303,10 +1318,14 @@ class PallasProtocolService:
                 after = json.dumps(account, ensure_ascii=False, sort_keys=True)
                 if before != after:
                     changed = True
+            self._migrate_snowluma_runtimes_on_load()
             if changed:
                 self._save_accounts()
         except Exception:
             self._accounts = {}
+
+    def _linux_docker_container_name(self, account: dict) -> str:
+        return self.linux_docker_container_name_for_account(account)
 
     def _save_accounts(self) -> None:
         self._accounts_file.write_text(
@@ -1322,15 +1341,6 @@ class PallasProtocolService:
     def _docker_logs_follow_tail(self) -> str:
         n = int(getattr(self._config, "pallas_protocol_max_log_lines", 500) or 500)
         return str(max(100, min(n, 3000)))
-
-    def _linux_docker_container_name(self, account: dict) -> str:
-        if account.get("snowluma_linux_docker"):
-            from .snowluma_docker import snowluma_docker_container_name
-
-            return snowluma_docker_container_name(account)
-        from .linux_docker import docker_container_name
-
-        return docker_container_name(account)
 
     def _linux_docker_container_running_sync(self, account: dict) -> bool:
         if not (
@@ -1362,18 +1372,14 @@ class PallasProtocolService:
     async def _remove_snowluma_linux_docker_container_for_account(
         self, account: dict
     ) -> None:
-        stub = {"id": str(account.get("id", "x")).strip() or "x"}
-        from .snowluma_docker import (
-            snowluma_docker_container_name,
-            snowluma_docker_remove_force,
-        )
+        from .snowluma_docker import snowluma_docker_remove_force
 
-        sl = snowluma_docker_container_name(stub)
+        name = self.linux_docker_container_name_for_account(account)
         if os.name == "nt":
             from .docker_cli import docker_stop_async
 
-            await docker_stop_async(sl)
-        await snowluma_docker_remove_force(sl)
+            await docker_stop_async(name)
+        await snowluma_docker_remove_force(name)
 
     async def _remove_both_linux_docker_container_names_for_account(
         self, account: dict
@@ -1621,6 +1627,11 @@ class PallasProtocolService:
             if v:
                 account[ws_key] = v
         be = self._protocol_runtime_backend(account)
+        if (
+            str(account.get(ACCOUNT_PROTOCOL_BACKEND_KEY) or "").strip().lower()
+            == SNOWLUMA_PROTOCOL_BACKEND
+        ):
+            self.ensure_account_snowluma_runtime(account, payload)
         be.apply_defaults(account, self._resolve_qq)
         if "webui_port" not in account:
             account["webui_port"] = self._next_free_webui_port()
@@ -1634,6 +1645,8 @@ class PallasProtocolService:
         self._merge_onebot_ws_from_env(account)
         be.prepare_dirs(account)
         be.sync_all_configs(account, self._resolve_qq)
+        if _bk == SNOWLUMA_PROTOCOL_BACKEND:
+            self.sync_runtime_ports_from_account(account)
         self._accounts[account_id] = account
         self._save_accounts()
         return self._compose_account_state(account_id, account)
@@ -1779,33 +1792,66 @@ class PallasProtocolService:
             raise KeyError("账号不存在")
         account = self._accounts.get(account_id) or {}
         account_data_dir = Path(str(account.get("account_data_dir", "")).strip())
+        shared_sl = bool(
+            account.get(SNOWLUMA_RUNTIME_ID_KEY)
+            and self.account_shares_snowluma_runtime(account)
+        )
+        sl_runtime_id = str(account.get(SNOWLUMA_RUNTIME_ID_KEY, "") or "").strip()
         try:
             await self.stop_account(account_id)
         except Exception:
             pass
-        if account.get("napcat_linux_docker") or account.get("snowluma_linux_docker"):
+        if account.get("napcat_linux_docker") or (
+            account.get("snowluma_linux_docker") and not shared_sl
+        ):
             try:
-                await self._remove_both_linux_docker_container_names_for_account(
-                    account
-                )
+                if account.get("napcat_linux_docker"):
+                    await self._remove_napcat_linux_docker_container_for_account(
+                        account
+                    )
+                if account.get("snowluma_linux_docker") and not shared_sl:
+                    await self._remove_snowluma_linux_docker_container_for_account(
+                        account
+                    )
             except Exception:
                 pass
         self._accounts.pop(account_id, None)
         self._runtimes.pop(account_id, None)
-        try:
-            if await asyncio.to_thread(account_data_dir.is_dir):
-                data_dir_resolved = await asyncio.to_thread(account_data_dir.resolve)
-                instances_root_resolved = await asyncio.to_thread(
-                    self._instances_root.resolve
-                )
-                # 清理实例目录数据
-                if (
-                    data_dir_resolved == instances_root_resolved
-                    or instances_root_resolved in data_dir_resolved.parents
-                ):
-                    shutil.rmtree(data_dir_resolved, ignore_errors=True)
-        except OSError:
-            pass
+        if shared_sl:
+            qq = str(self._resolve_qq(account) or account_id).strip()
+            try:
+                from .snowluma_docker import clear_snowluma_login_state_for_uin
+
+                if account_data_dir.is_dir() and qq.isdigit():
+                    await asyncio.to_thread(
+                        clear_snowluma_login_state_for_uin, account_data_dir, qq
+                    )
+                onebot = account_data_dir / "config" / f"onebot_{qq}.json"
+                if onebot.is_file():
+                    onebot.unlink()
+            except Exception:
+                pass
+        else:
+            try:
+                if await asyncio.to_thread(account_data_dir.is_dir):
+                    data_dir_resolved = await asyncio.to_thread(
+                        account_data_dir.resolve
+                    )
+                    instances_root_resolved = await asyncio.to_thread(
+                        self._instances_root.resolve
+                    )
+                    if (
+                        data_dir_resolved == instances_root_resolved
+                        or instances_root_resolved in data_dir_resolved.parents
+                    ):
+                        shutil.rmtree(data_dir_resolved, ignore_errors=True)
+            except OSError:
+                pass
+            if sl_runtime_id and not self.snowluma_runtime_members(sl_runtime_id):
+                try:
+                    self._sl_runtime_registry.delete(sl_runtime_id)
+                except KeyError:
+                    pass
         self._save_accounts()
 
     def is_running(self, account_id: str) -> bool:
@@ -1851,6 +1897,17 @@ class PallasProtocolService:
             return False
         if acc.get("napcat_linux_docker") or acc.get("snowluma_linux_docker"):
             return self._linux_docker_container_running_sync(acc)
+        rid = str(acc.get(SNOWLUMA_RUNTIME_ID_KEY, "") or "").strip()
+        if rid and (
+            str(acc.get(ACCOUNT_PROTOCOL_BACKEND_KEY) or "").strip().lower()
+            == SNOWLUMA_PROTOCOL_BACKEND
+        ):
+            from .snowluma_runtime_ops import snowluma_process_track_key
+
+            runtime = self._runtimes.get(snowluma_process_track_key(rid))
+            return bool(
+                runtime and runtime.process and runtime.process.returncode is None
+            )
         runtime = self._runtimes.get(account_id)
         return bool(runtime and runtime.process and runtime.process.returncode is None)
 
@@ -1865,10 +1922,24 @@ class PallasProtocolService:
         if disk_changed or env_changed:
             self._save_accounts()
         be = self._protocol_runtime_backend(account)
+        sl_rt = self.resolve_snowluma_runtime(account)
+        if sl_rt:
+            self.bind_account_to_snowluma_runtime(account, sl_rt)
         be.apply_defaults(account, self._resolve_qq)
         be.prepare_dirs(account)
         be.sync_all_configs(account, self._resolve_qq)
-        runtime = self._runtime(account_id)
+        rid = str(account.get(SNOWLUMA_RUNTIME_ID_KEY, "") or "").strip()
+        track_id = account_id
+        if rid and account.get("snowluma_linux_docker") is not False:
+            from .snowluma_runtime_ops import snowluma_process_track_key
+
+            # SnowLuma（Docker 或 Shell）进程跟踪键用 Runtime
+            if (
+                str(account.get(ACCOUNT_PROTOCOL_BACKEND_KEY) or "").strip().lower()
+                == SNOWLUMA_PROTOCOL_BACKEND
+            ):
+                track_id = snowluma_process_track_key(rid)
+        runtime = self._runtime(track_id)
         async with runtime.lock:
             if account.get("napcat_linux_docker"):
                 if self._linux_docker_container_running_sync(account):
@@ -1883,11 +1954,24 @@ class PallasProtocolService:
                 if self._linux_docker_container_running_sync(account):
                     await self.ensure_docker_logs_if_needed(account_id)
                     self.schedule_snowluma_auto_quick_login(account_id)
+                    try:
+                        await self.snowluma_inject_hook_via_webui(account_id)
+                    except Exception:
+                        pass
                     return self._compose_account_state(account_id, account)
                 return await self._start_account_snowluma_linux_docker(
                     account_id, account, runtime
                 )
             if runtime.process and runtime.process.returncode is None:
+                if (
+                    str(account.get(ACCOUNT_PROTOCOL_BACKEND_KEY) or "").strip().lower()
+                    == SNOWLUMA_PROTOCOL_BACKEND
+                ):
+                    try:
+                        await self.snowluma_inject_hook_via_webui(account_id)
+                    except Exception:
+                        pass
+                    self.schedule_snowluma_auto_quick_login(account_id)
                 return self._compose_account_state(account_id, account)
             command = str(account.get("command", "")).strip()
             if not command:
@@ -1900,7 +1984,6 @@ class PallasProtocolService:
                 raw_pb = account.get(ACCOUNT_PROTOCOL_BACKEND_KEY, "") or ""
                 bk = str(raw_pb).strip().lower() or DEFAULT_PROTOCOL_BACKEND
                 if bk != SNOWLUMA_PROTOCOL_BACKEND:
-                    # 设置 NapCat 工作目录
                     env_map["NAPCAT_WORKDIR"] = ad_abs
                     if self._launch.should_set_home_to_workdir():
                         env_map["HOME"] = ad_abs
@@ -1919,12 +2002,10 @@ class PallasProtocolService:
                     or any(Path(str(a)).suffix == ".AppImage" for a in args)
                 )
             ):
-                # 追加 no-sandbox 参数
                 args.append("--no-sandbox")
             launch_issues = be.check_launch_issues(account, self._resolve_qq)
             if launch_issues:
                 raise ValueError("; ".join(launch_issues))
-            # 读取工作目录
             workdir = str(account.get("working_dir", "")).strip() or None
             runtime.logs.clear()
             runtime.tracked_child_root_pid = None
@@ -1938,7 +2019,6 @@ class PallasProtocolService:
                     or any(Path(str(a)).suffix == ".AppImage" for a in args)
                 )
             ):
-                # AppImage 使用账号目录作为 cwd
                 cwd_final = account_data_dir
             runtime.process = await asyncio.create_subprocess_exec(
                 command,
@@ -1950,7 +2030,12 @@ class PallasProtocolService:
                 creationflags=self._launch.creation_flags(),
             )
             runtime.started_at = datetime.now(UTC)
-            runtime.drain_task = asyncio.create_task(self._drain_logs(account_id))
+            runtime.drain_task = asyncio.create_task(self._drain_logs(track_id))
+        if (
+            str(account.get(ACCOUNT_PROTOCOL_BACKEND_KEY) or "").strip().lower()
+            == SNOWLUMA_PROTOCOL_BACKEND
+        ):
+            self.schedule_snowluma_auto_quick_login(account_id)
         return self._compose_account_state(account_id, account)
 
     async def ensure_docker_logs_if_needed(self, account_id: str) -> None:
@@ -2142,9 +2227,20 @@ class PallasProtocolService:
             be.sync_webui(account, self._resolve_qq)
             self._save_accounts()
         be.apply_defaults(account, self._resolve_qq)
-        account["args"] = build_snowluma_docker_run_argv(
-            account, self._config, self._resolve_qq
-        )
+        sl_runtime = self.resolve_snowluma_runtime(account)
+        if sl_runtime:
+            self.bind_account_to_snowluma_runtime(account, sl_runtime)
+            from .snowluma_docker import build_snowluma_docker_run_argv_for_runtime
+
+            account["args"] = build_snowluma_docker_run_argv_for_runtime(
+                sl_runtime,
+                self._config,
+                account_id_label=str(account.get("id", "")),
+            )
+        else:
+            account["args"] = build_snowluma_docker_run_argv(
+                account, self._config, self._resolve_qq
+            )
         args = [str(x) for x in (account.get("args") or [])]
         launch_issues = be.check_launch_issues(account, self._resolve_qq)
         if launch_issues:
@@ -2186,10 +2282,23 @@ class PallasProtocolService:
                     account["snowluma_docker_host_onebot_ws"] = 0
                     be.apply_defaults(account, self._resolve_qq)
                     be.sync_all_configs(account, self._resolve_qq)
+                    self.sync_runtime_ports_from_account(account)
                     self._save_accounts()
-                account["args"] = build_snowluma_docker_run_argv(
-                    account, self._config, self._resolve_qq
-                )
+                sl_runtime = self.resolve_snowluma_runtime(account)
+                if sl_runtime:
+                    from .snowluma_docker import (
+                        build_snowluma_docker_run_argv_for_runtime,
+                    )
+
+                    account["args"] = build_snowluma_docker_run_argv_for_runtime(
+                        sl_runtime,
+                        self._config,
+                        account_id_label=str(account.get("id", "")),
+                    )
+                else:
+                    account["args"] = build_snowluma_docker_run_argv(
+                        account, self._config, self._resolve_qq
+                    )
                 args = [str(x) for x in (account.get("args") or [])]
                 continue
             err = f"docker run 失败 (exit {proc.returncode})"
@@ -2201,6 +2310,10 @@ class PallasProtocolService:
         if not snowluma_docker_container_running_sync(name):
             raise ValueError("容器已创建但未在运行，请检查: docker logs " + name)
         runtime.started_at = datetime.now(UTC)
+        from .snowluma_runtime_ops import snowluma_process_track_key
+
+        rid = str(account.get(SNOWLUMA_RUNTIME_ID_KEY, "") or "").strip()
+        drain_key = snowluma_process_track_key(rid) if rid else account_id
         logp = await asyncio.create_subprocess_exec(
             "docker",
             "logs",
@@ -2212,7 +2325,7 @@ class PallasProtocolService:
             stderr=asyncio.subprocess.STDOUT,
         )
         runtime.process = logp
-        runtime.drain_task = asyncio.create_task(self._drain_logs(account_id))
+        runtime.drain_task = asyncio.create_task(self._drain_logs(drain_key))
         self.schedule_snowluma_auto_quick_login(account_id)
         return self._compose_account_state(account_id, account)
 
@@ -2256,9 +2369,19 @@ class PallasProtocolService:
 
     async def stop_account(self, account_id: str) -> dict | None:
         account = self._accounts.get(account_id)
-        runtime = self._runtimes.get(account_id)
         if account is None:
             return None
+        # SnowLuma：停账号不拆共享 Runtime；整 Runtime 用 stop_snowluma_runtime
+        if (
+            str(account.get(ACCOUNT_PROTOCOL_BACKEND_KEY) or "").strip().lower()
+            == SNOWLUMA_PROTOCOL_BACKEND
+            and str(account.get(SNOWLUMA_RUNTIME_ID_KEY, "") or "").strip()
+        ):
+            pending = self._snowluma_auto_login_tasks.pop(account_id, None)
+            if pending is not None and not pending.done():
+                pending.cancel()
+            return self._compose_account_state(account_id, account)
+        runtime = self._runtimes.get(account_id)
         if account.get("napcat_linux_docker") or account.get("snowluma_linux_docker"):
             return await self._stop_account_linux_docker(account_id, account)
         if not runtime:
@@ -2266,7 +2389,6 @@ class PallasProtocolService:
         async with runtime.lock:
             proc = runtime.process
             if proc and proc.returncode is None:
-                # 结束进程树
                 if proc.pid:
                     await asyncio.to_thread(self._launch.kill_process_tree, proc.pid)
                 else:
@@ -2276,7 +2398,6 @@ class PallasProtocolService:
                 except TimeoutError:
                     proc.kill()
                     await proc.wait()
-            # 无论 proc 是否存在，都尝试杀掉 BootMain 脱离后追踪到的子进程
             if runtime.tracked_child_root_pid:
                 await asyncio.to_thread(
                     self._launch.kill_process_tree,
@@ -2289,6 +2410,18 @@ class PallasProtocolService:
         return self._compose_account_state(account_id, account)
 
     async def restart_account(self, account_id: str) -> dict:
+        account = self._accounts.get(account_id)
+        if account and (
+            str(account.get(ACCOUNT_PROTOCOL_BACKEND_KEY) or "").strip().lower()
+            == SNOWLUMA_PROTOCOL_BACKEND
+        ):
+            rid = str(account.get(SNOWLUMA_RUNTIME_ID_KEY, "") or "").strip()
+            if rid and self.account_shares_snowluma_runtime(account):
+                # 共享 Runtime：只重新 inject / 引导登录，不重启容器
+                return await self.start_account(account_id)
+            if rid:
+                await self.stop_snowluma_runtime(rid)
+                return await self.start_account(account_id)
         await self.stop_account(account_id)
         return await self.start_account(account_id)
 
@@ -2298,7 +2431,19 @@ class PallasProtocolService:
             raise KeyError("账号不存在")
         if not account_uses_snowluma_docker(account):
             raise ValueError("当前账号不是 SnowLuma Docker")
-        await self.stop_account(account_id)
+        qq = str(self._resolve_qq(account) or account_id).strip()
+        rid = str(account.get(SNOWLUMA_RUNTIME_ID_KEY, "") or "").strip()
+        shared = bool(rid and self.account_shares_snowluma_runtime(account))
+        if shared:
+            from .snowluma_docker import clear_snowluma_login_state_for_uin
+
+            ad = Path(str(account.get("account_data_dir", "")).strip())
+            await asyncio.to_thread(clear_snowluma_login_state_for_uin, ad, qq)
+            return await self.start_account(account_id)
+        if rid:
+            await self.stop_snowluma_runtime(rid)
+        else:
+            await self.stop_account(account_id)
         await self._remove_snowluma_linux_docker_container_for_account(account)
         from .snowluma_docker import clear_snowluma_login_state
 
@@ -2407,7 +2552,17 @@ class PallasProtocolService:
     def tail_logs(self, account_id: str, lines: int = 200) -> list[str]:
         if lines <= 0:
             return []
-        runtime = self._runtime(account_id)
+        account = self._accounts.get(account_id) or {}
+        rid = str(account.get(SNOWLUMA_RUNTIME_ID_KEY, "") or "").strip()
+        track_id = account_id
+        if rid and (
+            str(account.get(ACCOUNT_PROTOCOL_BACKEND_KEY) or "").strip().lower()
+            == SNOWLUMA_PROTOCOL_BACKEND
+        ):
+            from .snowluma_runtime_ops import snowluma_process_track_key
+
+            track_id = snowluma_process_track_key(rid)
+        runtime = self._runtime(track_id)
         return list(runtime.logs)[-lines:]
 
     def account_qrcode_path(self, account_id: str) -> Path | None:
@@ -2776,7 +2931,16 @@ class PallasProtocolService:
     ) -> dict:
         be = self._protocol_runtime_backend(account)
         be.apply_defaults(account, self._resolve_qq)
-        runtime = self._runtimes.get(account_id)
+        rid = str(account.get(SNOWLUMA_RUNTIME_ID_KEY, "") or "").strip()
+        track_key = account_id
+        if rid and (
+            str(account.get(ACCOUNT_PROTOCOL_BACKEND_KEY) or "").strip().lower()
+            == SNOWLUMA_PROTOCOL_BACKEND
+        ):
+            from .snowluma_runtime_ops import snowluma_process_track_key
+
+            track_key = snowluma_process_track_key(rid)
+        runtime = self._runtimes.get(track_key) or self._runtimes.get(account_id)
         process_running = False
         pid = None
         started_at = None
