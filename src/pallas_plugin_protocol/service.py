@@ -3310,7 +3310,9 @@ class PallasProtocolService(SnowLumaRuntimeOpsMixin):
         if pinned:
             return pinned
         if account.get("napcat_linux_docker"):
-            image = str(account.get("program_dir", "") or "").strip()
+            image = str(
+                account.get("docker_image") or account.get("program_dir", "") or ""
+            ).strip()
             if image.startswith("docker:"):
                 image = image[len("docker:") :].strip()
             if ":" in image:
@@ -3387,7 +3389,9 @@ class PallasProtocolService(SnowLumaRuntimeOpsMixin):
         if pinned:
             return "NapCat 实例选用托管版本（个别版本）"
         if account.get("napcat_linux_docker"):
-            image = str(account.get("program_dir", "") or "").strip()
+            image = str(
+                account.get("docker_image") or account.get("program_dir", "") or ""
+            ).strip()
             if image.startswith("docker:"):
                 image = image[len("docker:") :].strip()
             return f"NapCat Docker 镜像（{image or '未设置'}）"

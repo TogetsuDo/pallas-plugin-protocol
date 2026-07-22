@@ -216,6 +216,19 @@ async def test_switch_account_to_napcat_uses_supplied_docker_image() -> None:
     assert "snowluma_runtime_id" not in account
 
 
+def test_docker_runtime_display_prefers_account_docker_image() -> None:
+    service = object.__new__(PallasProtocolService)
+    account = {
+        "protocol_backend": DEFAULT_PROTOCOL_BACKEND,
+        "napcat_linux_docker": True,
+        "docker_image": "mlikiowa/napcat-docker:v4.4.20",
+        "program_dir": "docker:mlikiowa/napcat-docker:v4.18.7",
+    }
+
+    assert service._resolve_account_runtime_version(account) == "v4.4.20"
+    assert "v4.4.20" in service._resolve_account_runtime_source(account)
+
+
 @pytest.mark.asyncio
 async def test_switch_account_to_napcat_uses_payload_image_in_docker_argv() -> None:
     service, account = make_service()
