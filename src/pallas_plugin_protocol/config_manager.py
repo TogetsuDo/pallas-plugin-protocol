@@ -194,14 +194,14 @@ class AccountConfigManager:
             data.setdefault("o3HookMode", 1)
             data.setdefault("autoTimeSync", True)
             data.setdefault(
-            "bypass",
-            {
-                "hook": True,
-                "window": True,
-                "module": True,
-                "process": True,
-                "container": True,
-                "js": True,
+                "bypass",
+                {
+                    "hook": True,
+                    "window": True,
+                    "module": True,
+                    "process": True,
+                    "container": True,
+                    "js": True,
                 },
             )
             config_path.write_text(
