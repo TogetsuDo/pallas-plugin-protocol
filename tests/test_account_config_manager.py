@@ -50,6 +50,15 @@ def test_update_napcat_keeps_direct_bypass_object_compatibility(tmp_path) -> Non
     assert napcat["bypass"] == bypass
 
 
+def test_sync_napcat_core_enables_bypass_by_default(tmp_path) -> None:
+    account = {"account_data_dir": str(tmp_path), "qq": "10001"}
+
+    AccountConfigManager().sync_napcat_core(account, lambda item: item["qq"])
+
+    napcat = json.loads((tmp_path / "config" / "napcat.json").read_text())
+    assert all(napcat["bypass"].values())
+
+
 def test_update_napcat_removes_legacy_bypass_enabled_from_current_config(
     tmp_path,
 ) -> None:
