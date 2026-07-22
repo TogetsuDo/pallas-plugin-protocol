@@ -1,0 +1,363 @@
+"""账号协议端原子切换的服务层测试。"""
+
+from __future__ import annotations
+
+import sys
+import types
+from pathlib import Path
+from types import MethodType
+
+import pytest
+
+_ROOT = Path(__file__).resolve().parents[1] / "src" / "pallas_plugin_protocol"
+_PACKAGE = types.ModuleType("pallas_plugin_protocol")
+_PACKAGE.__path__ = [str(_ROOT)]
+sys.modules["pallas_plugin_protocol"] = _PACKAGE
+
+_PALLAS = types.ModuleType("pallas")
+_PALLAS.__path__ = []
+_PALLAS_API = types.ModuleType("pallas.api")
+_PALLAS_API.__path__ = []
+_PALLAS_PATHS = types.ModuleType("pallas.api.paths")
+_PALLAS_PATHS.resource_dir = lambda: Path("/tmp")
+_PALLAS_CONFIG = types.ModuleType("pallas.api.config")
+_PALLAS_CONFIG.field_help = lambda title, detail: f"{title}: {detail}"
+_PALLAS_CONFIG.install_hot_reload_config = lambda *args, **kwargs: (
+    types.SimpleNamespace(get=lambda: None)
+)
+_PALLAS_CONFIG.plugin_config_proxy = lambda *args, **kwargs: None
+_PALLAS_UTILS = types.ModuleType("pallas.api.utils")
+_PALLAS_UTILS.fetch_github_releases = lambda *args, **kwargs: []
+_PALLAS_UTILS.github_auth_headers = lambda *args, **kwargs: {}
+_PALLAS_UTILS.github_release_api_url = lambda *args, **kwargs: ""
+_PALLAS_UTILS.github_release_asset_url = lambda *args, **kwargs: ""
+_PALLAS_UTILS.StreamDownloadProgress = dict
+_PALLAS_UTILS.format_download_byte_size = lambda value: str(value)
+_PALLAS_UTILS.sync_stream_download_to_file = lambda *args, **kwargs: None
+sys.modules.update(
+    {
+        "pallas": _PALLAS,
+        "pallas.api": _PALLAS_API,
+        "pallas.api.paths": _PALLAS_PATHS,
+        "pallas.api.config": _PALLAS_CONFIG,
+        "pallas.api.utils": _PALLAS_UTILS,
+    }
+)
+
+from pallas_plugin_protocol.contract import (  # noqa: E402
+    DEFAULT_PROTOCOL_BACKEND,
+    SNOWLUMA_PROTOCOL_BACKEND,
+)
+from pallas_plugin_protocol.service import PallasProtocolService  # noqa: E402
+
+
+class RuntimeRegistry:
+    def __init__(self, runtime: dict | None = None) -> None:
+        self.runtime = runtime
+        self.created: list[dict] = []
+        self.deleted: list[str] = []
+
+    def get(self, runtime_id: str) -> dict | None:
+        if self.runtime and runtime_id == self.runtime["id"]:
+            return dict(self.runtime)
+        return None
+
+    def create(self, payload: dict) -> dict:
+        runtime = {
+            "id": "sl-rt-new",
+            "display_name": payload["display_name"],
+            "data_dir": "/tmp/snowluma-runtime",
+            "webui_port": 6200,
+        }
+        self.runtime = runtime
+        self.created.append(payload)
+        return dict(runtime)
+
+    def delete(self, runtime_id: str) -> None:
+        self.deleted.append(runtime_id)
+        if self.runtime and self.runtime["id"] == runtime_id:
+            self.runtime = None
+
+
+class Backend:
+    def __init__(self, calls: list[str]) -> None:
+        self.calls = calls
+
+    def apply_defaults(self, account: dict, resolve_qq: object) -> None:
+        self.calls.append("defaults")
+
+    def prepare_dirs(self, account: dict) -> None:
+        self.calls.append("prepare")
+
+    def sync_all_configs(self, account: dict, resolve_qq: object) -> None:
+        self.calls.append("sync")
+
+
+async def record_stop(service: PallasProtocolService, account_id: str) -> None:
+    service.calls.append("stop")
+
+
+async def record_remove(service: PallasProtocolService, account: dict) -> None:
+    service.calls.append("remove-containers")
+
+
+async def record_start(service: PallasProtocolService, account_id: str) -> None:
+    service.started.append(account_id)
+
+
+def make_service(runtime: dict | None = None) -> tuple[PallasProtocolService, dict]:
+    account = {
+        "id": "10001",
+        "display_name": "测试号",
+        "qq": "10001",
+        "protocol_backend": DEFAULT_PROTOCOL_BACKEND,
+        "account_data_dir": "/tmp/napcat-data",
+        "napcat_linux_docker": True,
+    }
+    service = PallasProtocolService.__new__(PallasProtocolService)
+    service._accounts = {"10001": account}
+    service._instances_root = Path("/tmp/instances")
+    service._sl_runtime_registry = RuntimeRegistry(runtime)
+    service.calls = []
+    service.started = []
+    service._resolve_qq = lambda item: str(item["qq"])
+    service._protocol_runtime_backend = lambda item: Backend(service.calls)
+    service._refresh_linux_docker_run_argv = lambda item: service.calls.append(
+        "docker-argv"
+    )
+    service._merge_onebot_ws_from_env = lambda item: False
+    service._next_free_webui_port = lambda: 6200
+    service._compose_account_state = lambda account_id, item: dict(item)
+    service._compose_snowluma_runtime_state = lambda item: {
+        **item,
+        "member_account_ids": ["10001"],
+    }
+    service.stop_account = MethodType(record_stop, service)
+    service._remove_both_linux_docker_container_names_for_account = MethodType(
+        record_remove, service
+    )
+    service._save_accounts = MethodType(lambda self: self.calls.append("save"), service)
+    service.start_account = MethodType(record_start, service)
+    return service, account
+
+
+@pytest.mark.asyncio
+async def test_switch_account_to_existing_snowluma_runtime_binds_and_restarts() -> None:
+    runtime = {"id": "sl-rt-existing", "data_dir": "/tmp/shared", "webui_port": 6200}
+    service, account = make_service(runtime)
+
+    result = await service.switch_account_runtime(
+        "10001",
+        {
+            "protocol_backend": SNOWLUMA_PROTOCOL_BACKEND,
+            "runtime_mode": "existing",
+            "runtime_id": runtime["id"],
+        },
+    )
+
+    assert result["account"]["protocol_backend"] == SNOWLUMA_PROTOCOL_BACKEND
+    assert account["snowluma_runtime_id"] == runtime["id"]
+    assert account["account_data_dir"] == runtime["data_dir"]
+    assert account["napcat_account_data_dir"] == "/tmp/napcat-data"
+    assert service.started == ["10001"]
+    assert service.calls == [
+        "stop",
+        "remove-containers",
+        "defaults",
+        "prepare",
+        "sync",
+        "docker-argv",
+        "save",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_switch_account_to_new_snowluma_runtime_creates_and_binds() -> None:
+    service, account = make_service()
+
+    result = await service.switch_account_runtime(
+        "10001", {"protocol_backend": SNOWLUMA_PROTOCOL_BACKEND, "runtime_mode": "new"}
+    )
+
+    assert result["runtime"]["id"] == account["snowluma_runtime_id"]
+    assert result["runtime"]["member_account_ids"] == ["10001"]
+    assert account["napcat_account_data_dir"] == "/tmp/napcat-data"
+
+
+@pytest.mark.asyncio
+async def test_switch_account_rejects_unknown_snowluma_runtime() -> None:
+    service, _ = make_service()
+
+    with pytest.raises(ValueError, match="Runtime 不存在"):
+        await service.switch_account_runtime(
+            "10001",
+            {
+                "protocol_backend": SNOWLUMA_PROTOCOL_BACKEND,
+                "runtime_mode": "existing",
+                "runtime_id": "missing",
+            },
+        )
+
+
+@pytest.mark.asyncio
+async def test_switch_account_to_napcat_uses_supplied_docker_image() -> None:
+    service, account = make_service()
+    account["protocol_backend"] = SNOWLUMA_PROTOCOL_BACKEND
+    account["snowluma_runtime_id"] = "sl-rt-existing"
+    account["snowluma_linux_docker"] = True
+
+    await service.switch_account_runtime(
+        "10001",
+        {"protocol_backend": DEFAULT_PROTOCOL_BACKEND, "docker_image": "napcat:test"},
+    )
+
+    assert account["protocol_backend"] == DEFAULT_PROTOCOL_BACKEND
+    assert account["docker_image"] == "napcat:test"
+    assert "snowluma_runtime_id" not in account
+
+
+@pytest.mark.asyncio
+async def test_switch_account_to_napcat_uses_payload_image_in_docker_argv() -> None:
+    service, account = make_service()
+    account.update(
+        {
+            "protocol_backend": SNOWLUMA_PROTOCOL_BACKEND,
+            "snowluma_runtime_id": "sl-rt-existing",
+            "snowluma_linux_docker": True,
+        }
+    )
+    service._config = types.SimpleNamespace(
+        pallas_protocol_docker_image="default:latest",
+        pallas_protocol_docker_internal_webui_port=6099,
+    )
+    service._refresh_linux_docker_run_argv = MethodType(
+        PallasProtocolService._refresh_linux_docker_run_argv, service
+    )
+
+    await service.switch_account_runtime(
+        "10001",
+        {"protocol_backend": DEFAULT_PROTOCOL_BACKEND, "docker_image": "napcat:test"},
+    )
+
+    assert account["args"][-1] == "napcat:test"
+
+
+@pytest.mark.asyncio
+async def test_switch_account_from_shared_snowluma_runtime_keeps_shared_container() -> (
+    None
+):
+    runtime = {"id": "sl-rt-existing", "data_dir": "/tmp/shared", "webui_port": 6200}
+    service, account = make_service(runtime)
+    account.update(
+        {
+            "protocol_backend": SNOWLUMA_PROTOCOL_BACKEND,
+            "snowluma_runtime_id": runtime["id"],
+            "snowluma_linux_docker": True,
+            "account_data_dir": runtime["data_dir"],
+            "napcat_account_data_dir": "/tmp/napcat-data",
+        }
+    )
+    service._accounts["10002"] = {
+        "id": "10002",
+        "qq": "10002",
+        "protocol_backend": SNOWLUMA_PROTOCOL_BACKEND,
+        "snowluma_runtime_id": runtime["id"],
+        "snowluma_linux_docker": True,
+        "account_data_dir": runtime["data_dir"],
+    }
+
+    async def shared_container_must_not_be_removed(
+        self: PallasProtocolService, item: dict
+    ) -> None:
+        raise AssertionError("不应解析或移除共享 SnowLuma Runtime 容器")
+
+    service._remove_both_linux_docker_container_names_for_account = MethodType(
+        shared_container_must_not_be_removed, service
+    )
+
+    result = await service.switch_account_runtime(
+        "10001", {"protocol_backend": DEFAULT_PROTOCOL_BACKEND}
+    )
+
+    assert result["account"]["protocol_backend"] == DEFAULT_PROTOCOL_BACKEND
+    assert account["account_data_dir"] == "/tmp/napcat-data"
+    assert service.started == ["10001"]
+
+
+@pytest.mark.asyncio
+async def test_switching_between_snowluma_runtimes_does_not_capture_snow_data_as_napcat() -> (
+    None
+):
+    service, account = make_service(
+        {"id": "sl-rt-old", "data_dir": "/tmp/snow-old", "webui_port": 6200}
+    )
+    account.update(
+        {
+            "protocol_backend": SNOWLUMA_PROTOCOL_BACKEND,
+            "snowluma_runtime_id": "sl-rt-old",
+            "account_data_dir": "/tmp/snow-old",
+        }
+    )
+
+    await service.switch_account_runtime(
+        "10001", {"protocol_backend": SNOWLUMA_PROTOCOL_BACKEND, "runtime_mode": "new"}
+    )
+    await service.switch_account_runtime(
+        "10001", {"protocol_backend": DEFAULT_PROTOCOL_BACKEND}
+    )
+
+    assert "napcat_account_data_dir" not in account
+    assert account["account_data_dir"] == ""
+
+
+@pytest.mark.asyncio
+async def test_switch_rolls_back_account_and_new_runtime_when_config_sync_fails() -> (
+    None
+):
+    service, account = make_service()
+    snapshot = dict(account)
+
+    class FailingBackend(Backend):
+        def sync_all_configs(self, account: dict, resolve_qq: object) -> None:
+            super().sync_all_configs(account, resolve_qq)
+            raise RuntimeError("sync failed")
+
+    service._protocol_runtime_backend = lambda item: FailingBackend(service.calls)
+
+    with pytest.raises(RuntimeError, match="sync failed"):
+        await service.switch_account_runtime(
+            "10001",
+            {"protocol_backend": SNOWLUMA_PROTOCOL_BACKEND, "runtime_mode": "new"},
+        )
+
+    assert account == snapshot
+    assert service._sl_runtime_registry.deleted == ["sl-rt-new"]
+    assert service.started == ["10001"]
+
+
+@pytest.mark.asyncio
+async def test_switch_rolls_back_account_and_new_runtime_when_start_fails() -> None:
+    service, account = make_service()
+    snapshot = dict(account)
+    attempts = 0
+
+    async def fail_then_restore_start(
+        self: PallasProtocolService, account_id: str
+    ) -> None:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("start failed")
+        self.started.append(account_id)
+
+    service.start_account = MethodType(fail_then_restore_start, service)
+
+    with pytest.raises(RuntimeError, match="start failed"):
+        await service.switch_account_runtime(
+            "10001",
+            {"protocol_backend": SNOWLUMA_PROTOCOL_BACKEND, "runtime_mode": "new"},
+        )
+
+    assert account == snapshot
+    assert service._sl_runtime_registry.deleted == ["sl-rt-new"]
+    assert service.started == ["10001"]

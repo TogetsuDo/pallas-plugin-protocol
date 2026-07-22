@@ -92,9 +92,10 @@ def build_docker_run_argv(
 ) -> list[str]:
     _ = str(resolve_qq(account) or "").strip()
     img = (
-        getattr(config, "pallas_protocol_docker_image", None)
+        str(account.get("docker_image", "") or "").strip()
+        or str(getattr(config, "pallas_protocol_docker_image", None) or "").strip()
         or "mlikiowa/napcat-docker:latest"
-    ).strip()
+    )
     in_port = int(
         getattr(config, "pallas_protocol_docker_internal_webui_port", 6099) or 6099
     )

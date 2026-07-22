@@ -74,7 +74,23 @@ class AccountConfigManager:
             self._sync_account_onebot_fields(account, merged)
         if "napcat" in payload and isinstance(payload["napcat"], dict):
             current = self.safe_read_json(napcat_path)
-            merged = {**current, **payload["napcat"]}
+            current.pop("bypass_enabled", None)
+            napcat_payload = dict(payload["napcat"])
+            bypass_enabled = napcat_payload.pop("bypass_enabled", None)
+            if isinstance(bypass_enabled, bool):
+                napcat_payload["bypass"] = {
+                    key: bypass_enabled
+                    for key in (
+                        "hook",
+                        "window",
+                        "module",
+                        "process",
+                        "container",
+                        "js",
+                    )
+                }
+            merged = {**current, **napcat_payload}
+            merged.pop("bypass_enabled", None)
             napcat_path.write_text(
                 json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8"
             )

@@ -1,10 +1,13 @@
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
 
 import nonebot
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from pallas.console.webui import console_login
 from starlette.routing import WebSocketRoute
 
 nonebot.init()
@@ -96,7 +99,8 @@ def test_legacy_protocol_login_is_not_an_independent_html_page() -> None:
 
 def test_console_instance_novnc_proxies_the_registered_subpath(monkeypatch) -> None:
     monkeypatch.setattr(
-        "pallas.console.webui.console_login.extract_session_from_request",
+        console_login,
+        "extract_session_from_request",
         lambda **_kwargs: "session",
     )
     server = ThreadingHTTPServer(("127.0.0.1", 0), _UpstreamHandler)
@@ -142,3 +146,95 @@ def test_console_registers_an_instance_websocket_proxy_route() -> None:
         == "/pallas/protocol/instances/{account_id}/{surface}/{subpath:path}"
         for route in app.routes
     )
+
+
+def test_runtime_switch_route_authenticates_and_calls_service(monkeypatch) -> None:
+    monkeypatch.setattr(
+        console_login,
+        "extract_session_from_request",
+        lambda **_kwargs: "session",
+    )
+    manager = SimpleNamespace(
+        switch_account_runtime=AsyncMock(return_value={"account": {"id": "10001"}})
+    )
+    app = FastAPI()
+    register_pallas_protocol_routes(
+        app,
+        manager=manager,
+        plugin_config=SimpleNamespace(
+            pallas_protocol_webui_path="",
+            pallas_protocol_web_implementation="",
+            pallas_protocol_webui_enabled=True,
+        ),
+    )
+
+    response = TestClient(app).post(
+        "/protocol/console/api/accounts/10001/runtime-switch",
+        json={"protocol_backend": "snowluma", "runtime_mode": "new"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"account": {"id": "10001"}}
+    manager.switch_account_runtime.assert_awaited_once_with(
+        "10001", {"protocol_backend": "snowluma", "runtime_mode": "new"}
+    )
+
+
+def test_runtime_switch_route_rejects_unauthenticated_requests(monkeypatch) -> None:
+    monkeypatch.setattr(
+        console_login, "extract_session_from_request", lambda **_kwargs: None
+    )
+    monkeypatch.setattr(console_login, "is_console_auth_configured", lambda: True)
+    manager = SimpleNamespace(switch_account_runtime=AsyncMock())
+    app = FastAPI()
+    register_pallas_protocol_routes(
+        app,
+        manager=manager,
+        plugin_config=SimpleNamespace(
+            pallas_protocol_webui_path="",
+            pallas_protocol_web_implementation="",
+            pallas_protocol_webui_enabled=True,
+        ),
+    )
+
+    response = TestClient(app).post(
+        "/protocol/console/api/accounts/10001/runtime-switch",
+        json={"protocol_backend": "snowluma"},
+    )
+
+    assert response.status_code == 401
+    manager.switch_account_runtime.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("error", "status_code"),
+    [(KeyError("账号不存在"), 404), (ValueError("参数无效"), 400)],
+)
+def test_runtime_switch_route_maps_service_errors(
+    monkeypatch, error: Exception, status_code: int
+) -> None:
+    monkeypatch.setattr(
+        console_login,
+        "extract_session_from_request",
+        lambda **_kwargs: "session",
+    )
+    manager = SimpleNamespace(switch_account_runtime=AsyncMock(side_effect=error))
+    app = FastAPI()
+    register_pallas_protocol_routes(
+        app,
+        manager=manager,
+        plugin_config=SimpleNamespace(
+            pallas_protocol_webui_path="",
+            pallas_protocol_web_implementation="",
+            pallas_protocol_webui_enabled=True,
+        ),
+    )
+    payload = {"protocol_backend": "snowluma"}
+
+    response = TestClient(app).post(
+        "/protocol/console/api/accounts/10001/runtime-switch",
+        json=payload,
+    )
+
+    assert response.status_code == status_code
+    manager.switch_account_runtime.assert_awaited_once_with("10001", payload)

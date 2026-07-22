@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import json
 import os
 import re
@@ -29,6 +30,7 @@ from .account_migration import (
     list_napcat_account_ids,
     migrate_account_dict_to_snowluma,
     napcat_docker_container_name_for_account,
+    prepare_account_for_snowluma_migration,
 )
 from .backends import ProtocolRuntimeBackend, make_protocol_runtime_backend
 from .config import (
@@ -1786,6 +1788,153 @@ class PallasProtocolService(SnowLumaRuntimeOpsMixin):
             "restarted": restarted,
             "needs_restart": bool(need_restart),
         }
+
+    def _resolve_switch_snowluma_runtime(self, account: dict, payload: dict) -> dict:
+        mode = str(payload.get("runtime_mode", "")).strip().lower()
+        if mode == "new":
+            return self._sl_runtime_registry.create(
+                {
+                    "display_name": str(
+                        payload.get("runtime_display_name")
+                        or account.get("display_name")
+                        or account.get("id")
+                        or "SnowLuma"
+                    ).strip()
+                    or "SnowLuma",
+                    "webui_port": self._next_free_webui_port(),
+                }
+            )
+        if mode != "existing":
+            raise ValueError("SnowLuma runtime_mode 仅支持 new 或 existing")
+        runtime_id = str(payload.get("runtime_id", "")).strip()
+        runtime = self._sl_runtime_registry.get(runtime_id)
+        if not runtime:
+            raise ValueError(f"Runtime 不存在: {runtime_id}")
+        return runtime
+
+    def _prepare_account_for_napcat_switch(self, account: dict, payload: dict) -> None:
+        napcat_data_dir = str(account.pop("napcat_account_data_dir", "") or "").strip()
+        if napcat_data_dir:
+            account["account_data_dir"] = napcat_data_dir
+        else:
+            account["account_data_dir"] = ""
+        for key in (
+            SNOWLUMA_RUNTIME_ID_KEY,
+            "snowluma_runtime_legacy_container_account_id",
+            "snowluma_linux_docker",
+            "snowluma_docker_host_onebot_http",
+            "snowluma_docker_host_onebot_ws",
+            "snowluma_docker_host_novnc_port",
+            "snowluma_docker_host_vnc_port",
+            "snowluma_managed_webui_password",
+        ):
+            account.pop(key, None)
+        account[ACCOUNT_PROTOCOL_BACKEND_KEY] = DEFAULT_PROTOCOL_BACKEND
+        account["program_dir"] = ""
+        account["command"] = ""
+        account["args"] = []
+        account["working_dir"] = ""
+        account.pop(MANAGED_RUNTIME_TAG_KEY, None)
+        image = str(payload.get("docker_image", "") or "").strip()
+        if image:
+            account["docker_image"] = image
+            account["program_dir"] = f"docker:{image}"
+
+    async def switch_account_runtime(self, account_id: str, payload: dict) -> dict:
+        """停止旧实例后切换协议后端，并按目标后端重新生成配置再启动。"""
+        account = self._accounts.get(account_id)
+        if not account:
+            raise KeyError("账号不存在")
+        target = str(payload.get(ACCOUNT_PROTOCOL_BACKEND_KEY, "")).strip().lower()
+        if target not in (DEFAULT_PROTOCOL_BACKEND, SNOWLUMA_PROTOCOL_BACKEND):
+            raise ValueError("protocol_backend 仅支持 napcat 或 snowluma")
+
+        old_backend = (
+            str(account.get(ACCOUNT_PROTOCOL_BACKEND_KEY) or DEFAULT_PROTOCOL_BACKEND)
+            .strip()
+            .lower()
+            or DEFAULT_PROTOCOL_BACKEND
+        )
+        shared_snowluma_runtime = (
+            old_backend == SNOWLUMA_PROTOCOL_BACKEND
+            and self.account_shares_snowluma_runtime(account)
+        )
+        original_account = copy.deepcopy(account)
+        runtime: dict | None = None
+        created_runtime_id = ""
+        created_runtime_data_dir: Path | None = None
+        if target == SNOWLUMA_PROTOCOL_BACKEND:
+            runtime = self._resolve_switch_snowluma_runtime(account, payload)
+            if str(payload.get("runtime_mode", "")).strip().lower() == "new":
+                created_runtime_id = str(runtime["id"])
+                created_runtime_data_dir = Path(
+                    str(runtime.get("data_dir", "") or "").strip()
+                )
+
+        try:
+            await self.stop_account(account_id)
+            if not shared_snowluma_runtime:
+                await self._remove_both_linux_docker_container_names_for_account(
+                    account
+                )
+            if runtime:
+                if old_backend == DEFAULT_PROTOCOL_BACKEND:
+                    napcat_data_dir = str(
+                        account.get("account_data_dir", "") or ""
+                    ).strip()
+                    if napcat_data_dir:
+                        account["napcat_account_data_dir"] = napcat_data_dir
+                prepare_account_for_snowluma_migration(
+                    account,
+                    instances_root=self._instances_root,
+                    preserve_napcat_data=True,
+                )
+                self.bind_account_to_snowluma_runtime(account, runtime)
+            else:
+                self._prepare_account_for_napcat_switch(account, payload)
+
+            backend = self._protocol_runtime_backend(account)
+            backend.apply_defaults(account, self._resolve_qq)
+            self._merge_onebot_ws_from_env(account)
+            backend.prepare_dirs(account)
+            backend.sync_all_configs(account, self._resolve_qq)
+            self._refresh_linux_docker_run_argv(account)
+            account["updated_at"] = datetime.now(UTC).isoformat()
+            self._save_accounts()
+            await self.start_account(account_id)
+            return {
+                "account": self._compose_account_state(account_id, account),
+                "runtime": (
+                    self._compose_snowluma_runtime_state(runtime) if runtime else None
+                ),
+            }
+        except Exception:
+            if created_runtime_id:
+                try:
+                    await self.stop_snowluma_runtime(created_runtime_id)
+                except Exception:
+                    pass
+            account.clear()
+            account.update(original_account)
+            if created_runtime_id:
+                try:
+                    self._sl_runtime_registry.delete(created_runtime_id)
+                except Exception:
+                    pass
+                if created_runtime_data_dir and created_runtime_data_dir.is_dir():
+                    try:
+                        data_dir = created_runtime_data_dir.resolve()
+                        instances_root = self._instances_root.resolve()
+                        if instances_root in data_dir.parents:
+                            shutil.rmtree(data_dir, ignore_errors=True)
+                    except OSError:
+                        pass
+            self._save_accounts()
+            try:
+                await self.start_account(account_id)
+            except Exception:
+                pass
+            raise
 
     async def delete_account(self, account_id: str) -> None:
         if account_id not in self._accounts:
