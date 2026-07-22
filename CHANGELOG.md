@@ -5,6 +5,8 @@
 
 ## [Unreleased]
 
+- feat(snowluma): 显式 SnowLuma Runtime，支持一个进程/容器挂多个 QQ（Shell + Docker）；启停 QQ 与启停 Runtime 分层；旧账号自动迁移为单 QQ Runtime。
+
 ## [4.0.36] - 2026-07-18
 
 - fix(relogin): 重新上号前通过 Pallas-Bot 集群在线态判断账号是否已连接；已在线时直接提示无需操作，不再重启协议端。

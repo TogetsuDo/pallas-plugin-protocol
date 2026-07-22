@@ -14,6 +14,8 @@ DEFAULT_PROTOCOL_WEB_MOUNT_SLUG: str = "console"
 ACCOUNT_PROTOCOL_BACKEND_KEY: str = "protocol_backend"
 # 账号选用托管解压子目录对应的 Release 标记
 MANAGED_RUNTIME_TAG_KEY: str = "managed_runtime_tag"
+# SnowLuma 多 QQ 共享进程/容器：账号挂载的 Runtime id
+SNOWLUMA_RUNTIME_ID_KEY: str = "snowluma_runtime_id"
 
 # 协议页面前缀
 PROTOCOL_HTTP_PREFIX: str = "/protocol"

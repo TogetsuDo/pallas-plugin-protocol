@@ -713,6 +713,114 @@ def register_pallas_protocol_routes(
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
 
+    @app.get(f"{base}/api/snowluma/runtimes")
+    async def list_snowluma_runtimes(
+        token: str | None = Query(default=None),
+        x_pallas_protocol_token: str | None = Header(
+            default=None, alias="X-Pallas-Protocol-Token"
+        ),
+    ):
+        _auth(x_pallas_protocol_token, token)
+        return {"runtimes": await asyncio.to_thread(manager.list_snowluma_runtimes)}
+
+    @app.get(f"{base}/api/snowluma/runtimes/{{runtime_id}}")
+    async def get_snowluma_runtime(
+        runtime_id: str,
+        token: str | None = Query(default=None),
+        x_pallas_protocol_token: str | None = Header(
+            default=None, alias="X-Pallas-Protocol-Token"
+        ),
+    ):
+        _auth(x_pallas_protocol_token, token)
+        item = await asyncio.to_thread(manager.get_snowluma_runtime, runtime_id)
+        if item is None:
+            raise HTTPException(status_code=404, detail="Runtime 不存在")
+        return {"runtime": item}
+
+    @app.post(f"{base}/api/snowluma/runtimes")
+    async def create_snowluma_runtime(
+        payload: dict[str, Any],
+        token: str | None = Query(default=None),
+        x_pallas_protocol_token: str | None = Header(
+            default=None, alias="X-Pallas-Protocol-Token"
+        ),
+    ):
+        _auth(x_pallas_protocol_token, token)
+        try:
+            item = await asyncio.to_thread(manager.create_snowluma_runtime, payload)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        return {"runtime": item}
+
+    @app.put(f"{base}/api/snowluma/runtimes/{{runtime_id}}")
+    async def update_snowluma_runtime(
+        runtime_id: str,
+        payload: dict[str, Any],
+        token: str | None = Query(default=None),
+        x_pallas_protocol_token: str | None = Header(
+            default=None, alias="X-Pallas-Protocol-Token"
+        ),
+    ):
+        _auth(x_pallas_protocol_token, token)
+        try:
+            item = await asyncio.to_thread(
+                manager.update_snowluma_runtime, runtime_id, payload
+            )
+        except KeyError as e:
+            raise HTTPException(status_code=404, detail=str(e)) from e
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        return {"runtime": item}
+
+    @app.delete(f"{base}/api/snowluma/runtimes/{{runtime_id}}")
+    async def delete_snowluma_runtime(
+        runtime_id: str,
+        force: bool = Query(default=False),
+        token: str | None = Query(default=None),
+        x_pallas_protocol_token: str | None = Header(
+            default=None, alias="X-Pallas-Protocol-Token"
+        ),
+    ):
+        _auth(x_pallas_protocol_token, token)
+        try:
+            await manager.delete_snowluma_runtime(runtime_id, force=force)
+        except KeyError as e:
+            raise HTTPException(status_code=404, detail=str(e)) from e
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        return {"ok": True}
+
+    @app.post(f"{base}/api/snowluma/runtimes/{{runtime_id}}/start")
+    async def start_snowluma_runtime(
+        runtime_id: str,
+        token: str | None = Query(default=None),
+        x_pallas_protocol_token: str | None = Header(
+            default=None, alias="X-Pallas-Protocol-Token"
+        ),
+    ):
+        _auth(x_pallas_protocol_token, token)
+        try:
+            item = await manager.start_snowluma_runtime(runtime_id)
+        except KeyError as e:
+            raise HTTPException(status_code=404, detail=str(e)) from e
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        return {"runtime": item}
+
+    @app.post(f"{base}/api/snowluma/runtimes/{{runtime_id}}/stop")
+    async def stop_snowluma_runtime(
+        runtime_id: str,
+        token: str | None = Query(default=None),
+        x_pallas_protocol_token: str | None = Header(
+            default=None, alias="X-Pallas-Protocol-Token"
+        ),
+    ):
+        _auth(x_pallas_protocol_token, token)
+        item = await manager.stop_snowluma_runtime(runtime_id)
+        if item is None:
+            raise HTTPException(status_code=404, detail="Runtime 不存在")
+        return {"runtime": item}
+
     @app.get(f"{base}/api/accounts")
     async def list_accounts(
         token: str | None = Query(default=None),
