@@ -5,6 +5,10 @@
 
 ## [Unreleased]
 
+## [4.0.39] - 2026-07-24
+
+- fix(runtime): 保存协议资产时仅在 Docker↔非 Docker 模式切换时停进程/删容器；仅改镜像等配置不再连带停止 SnowLuma 等其它协议端。
+
 ## [4.0.38] - 2026-07-22
 
 - feat(runtime): 支持按账号切换 NapCat / SnowLuma 运行时、NapCat Docker 镜像，以及新建或挂载已有 SnowLuma Runtime；切换失败自动回滚。

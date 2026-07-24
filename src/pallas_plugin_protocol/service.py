@@ -293,9 +293,6 @@ class PallasProtocolService(SnowLumaRuntimeOpsMixin):
             json.dumps(updated, ensure_ascii=False, indent=2), encoding="utf-8"
         )
         self._apply_runtime_profile_to_config(updated)
-        prune = str(payload.get("prune_containers", "all")).strip().lower()
-        if prune not in ("all", "napcat", "snowluma"):
-            prune = "all"
         prev_nap = (
             str(
                 current.get("napcat_runtime_mode")
@@ -320,23 +317,52 @@ class PallasProtocolService(SnowLumaRuntimeOpsMixin):
             prev_snow = defm
         nc_flip = (prev_nap == "docker") != (nap == "docker")
         sl_flip = (prev_snow == "docker") != (snow == "docker")
-        if nc_flip and sl_flip and prune != "all":
-            raise ValueError(
-                "NapCat 与 SnowLuma 的运行模式均涉及 Docker 开关变化时，须选择「NapCat 与 SnowLuma 全部」"
-                "：保存会先停进程并按范围删容器，仅选一侧无法同时清两套栈的旧容器。"
+        # 仅 Docker↔非 Docker 模式切换才停进程/删容器；改镜像或其它字段只刷新启动参数。
+        prune_raw = payload.get("prune_containers", None)
+        if prune_raw is None or str(prune_raw).strip() == "":
+            if nc_flip and sl_flip:
+                prune = "all"
+            elif nc_flip:
+                prune = "napcat"
+            elif sl_flip:
+                prune = "snowluma"
+            else:
+                prune = ""
+        else:
+            prune = str(prune_raw).strip().lower()
+            if prune not in ("all", "napcat", "snowluma"):
+                prune = "all"
+        if nc_flip or sl_flip:
+            if nc_flip and sl_flip and prune != "all":
+                raise ValueError(
+                    "NapCat 与 SnowLuma 的运行模式均涉及 Docker 开关变化时，须选择「NapCat 与 SnowLuma 全部」"
+                    "：保存会先停进程并按范围删容器，仅选一侧无法同时清两套栈的旧容器。"
+                )
+            if nc_flip and prune not in ("all", "napcat"):
+                raise ValueError(
+                    "NapCat 运行模式在 Docker 与非 Docker 间切换时，须选择「全部」或「仅 NapCat」作为容器清理范围。"
+                )
+            if sl_flip and prune not in ("all", "snowluma"):
+                raise ValueError(
+                    "SnowLuma 运行模式在 Docker 与非 Docker 间切换时，须选择「全部」或「仅 SnowLuma」作为容器清理范围。"
+                )
+            await self._prune_all_protocol_docker_containers_after_runtime_profile_change(
+                prune_containers=prune or "all"
             )
-        if nc_flip and prune not in ("all", "napcat"):
-            raise ValueError(
-                "NapCat 运行模式在 Docker 与非 Docker 间切换时，须选择「全部」或「仅 NapCat」作为容器清理范围。"
-            )
-        if sl_flip and prune not in ("all", "snowluma"):
-            raise ValueError(
-                "SnowLuma 运行模式在 Docker 与非 Docker 间切换时，须选择「全部」或「仅 SnowLuma」作为容器清理范围。"
-            )
-        await self._prune_all_protocol_docker_containers_after_runtime_profile_change(
-            prune_containers=prune
-        )
+        else:
+            self._reapply_runtime_profile_launch_settings()
         return updated
+
+    def _reapply_runtime_profile_launch_settings(self) -> None:
+        """按当前全局 runtime 刷新账号启动参数，不停进程、不删容器。"""
+        for account in self._accounts.values():
+            self._launch.apply_defaults(account, self._resolve_qq)
+            be = self._protocol_runtime_backend(account)
+            be.prepare_dirs(account)
+            be.sync_all_configs(account, self._resolve_qq)
+            self._refresh_linux_docker_run_argv(account)
+            account["updated_at"] = datetime.now(UTC).isoformat()
+        self._save_accounts()
 
     async def _prune_all_protocol_docker_containers_after_runtime_profile_change(
         self, *, prune_containers: str = "all"
@@ -378,14 +404,7 @@ class PallasProtocolService(SnowLumaRuntimeOpsMixin):
                 logger.exception(
                     f"Pallas-Bot 协议端: 全局 runtime 切换时删除 Docker 容器 {account_id} 异常"
                 )
-        for account in self._accounts.values():
-            self._launch.apply_defaults(account, self._resolve_qq)
-            be = self._protocol_runtime_backend(account)
-            be.prepare_dirs(account)
-            be.sync_all_configs(account, self._resolve_qq)
-            self._refresh_linux_docker_run_argv(account)
-            account["updated_at"] = datetime.now(UTC).isoformat()
-        self._save_accounts()
+        self._reapply_runtime_profile_launch_settings()
 
     def runtime_overview(self) -> dict:
         manifest = self._runtime_store.read_manifest()
